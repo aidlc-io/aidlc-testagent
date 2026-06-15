@@ -1,0 +1,57 @@
+{
+  "name": "aidlc-testagent",
+  "version": "0.1.0",
+  "description": "Open-source AI test agent for web, desktop, API & mobile. Point it at a target, approve the plan, get a passing test suite. No telemetry.",
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "bin": {
+    "aidlc-testagent": "./dist/cli/index.js",
+    "ata": "./dist/cli/index.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsc -p tsconfig.json --watch",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint \"src/**/*.ts\"",
+    "lint:fix": "eslint \"src/**/*.ts\" --fix",
+    "ata": "node --enable-source-maps --experimental-strip-types src/cli/index.ts",
+    "test": "playwright test"
+  },
+  "keywords": [
+    "testing",
+    "ai",
+    "playwright",
+    "electron",
+    "e2e",
+    "test-generation",
+    "agent",
+    "no-telemetry"
+  ],
+  "dependencies": {
+    "@clack/prompts": "^0.7.0",
+    "commander": "^12.1.0",
+    "glob": "^11.0.0",
+    "yaml": "^2.5.0",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.48.0",
+    "@types/node": "^22.7.0",
+    "@typescript-eslint/eslint-plugin": "^8.8.0",
+    "@typescript-eslint/parser": "^8.8.0",
+    "eslint": "^9.12.0",
+    "playwright": "^1.48.0",
+    "typescript": "^5.6.0"
+  },
+  "peerDependencies": {
+    "@playwright/test": "^1.48.0"
+  }
+}

@@ -1,0 +1,23 @@
+# testagent.config.yaml — root manifest (PRD §7).
+# No telemetry. No model API keys: reasoning is delegated to a local LLM CLI.
+version: 1
+env: staging-only # global guardrail; refuse non-staging/non-public hosts (PRD §13)
+
+llm:
+  provider: claude-cli # shell out to a locally logged-in CLI
+  model: claude-sonnet-4-6 # passed through as --model
+  bare: true # use --bare in CI for reproducible runs
+  max_turns: 1 # the CLI is a reasoning engine, not its own agent
+
+defaults:
+  max_heal_attempts: 2
+  timeout_ms: 30000
+  approval: prompt # prompt | auto | manual-edit
+  max_budget_usd: 2.00 # cost guard per target run; 0 = unlimited
+  stability:
+    runs: 3 # run each new test N times; accept only if all pass
+    quarantine: true # flaky tests -> quarantine, not the green suite
+
+targets:
+  - include: targets/public/*.target.yaml
+  - include: targets/private/*.target.yaml # gitignored; optional

@@ -1,0 +1,10 @@
+# A bare, no-auth, whole-target example: just point at a URL.
+name: todomvc
+adapter: playwright-web
+url: https://demo.playwright.dev/todomvc
+perception: dom
+
+success:
+  min_scenarios: 3
+  must_pass: true
+  max_heal_attempts: 2

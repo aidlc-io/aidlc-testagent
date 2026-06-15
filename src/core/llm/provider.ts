@@ -1,0 +1,40 @@
+/**
+ * The LLM provider contract (PRD §7a).
+ *
+ * `core/` depends ONLY on this interface — never on Claude Code, `claude`, or
+ * any specific CLI — so swapping reasoning engines is a one-line config change.
+ * `aidlc-testagent` does not call any model API directly and manages no API
+ * keys: every provider shells out to a locally-installed, already-authenticated
+ * CLI whose auth/billing are its own responsibility.
+ */
+
+/** A JSON Schema object passed to the CLI to demand schema-conforming output. */
+export type JsonSchema = Record<string, unknown>;
+
+export interface CompletionRequest {
+  /** System / role framing for the model. */
+  system?: string;
+  /** The user prompt. */
+  prompt: string;
+  /** When set, demand output conforming to this JSON Schema. */
+  schema?: JsonSchema;
+  /** Optional per-call model override (else the provider default is used). */
+  model?: string;
+}
+
+export interface CompletionResult {
+  /** The model's textual result (the `.result` field of the CLI envelope). */
+  text: string;
+  /** The raw parsed envelope, for debugging. */
+  raw?: unknown;
+  /** Cost reported by the CLI, fed to the cost guard (PRD §7). */
+  costUsd?: number;
+}
+
+export interface LlmProvider {
+  /** Identifier for logs/diagnostics (e.g. `claude-cli`). */
+  readonly id: string;
+  /** Verify the underlying CLI is installed and authenticated (preflight). */
+  preflight(): Promise<void>;
+  complete(req: CompletionRequest): Promise<CompletionResult>;
+}

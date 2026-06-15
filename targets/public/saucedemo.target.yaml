@@ -1,0 +1,27 @@
+name: saucedemo
+adapter: playwright-web
+url: https://www.saucedemo.com
+perception: dom
+
+# Auth: log in once, reuse the session. Credentials come from env, never YAML.
+# SauceDemo's demo credentials are public (standard_user / secret_sauce); set
+# them in your shell or CI:  export SAUCE_USER=standard_user SAUCE_PASS=secret_sauce
+auth:
+  strategy: form
+  credentials_env: SAUCE_USER, SAUCE_PASS
+  store_state: .auth/saucedemo.json
+
+# Grounding context — ordered by trust (intent before implementation).
+context:
+  requirements: [docs/requirements/checkout.md]
+  manual_tests: [test-cases/checkout.md]
+
+# Restrict generation to ONE feature (the checkout flow) for a fast, focused run.
+scope:
+  feature: checkout
+  requirement: docs/requirements/checkout.md
+
+success:
+  min_scenarios: 3
+  must_pass: true
+  max_heal_attempts: 2

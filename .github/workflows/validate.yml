@@ -1,0 +1,73 @@
+name: validate
+
+# Runs on PR + main (PRD §12). Public targets only. Private targets run in a
+# separate, secrets-gated workflow (not on forks).
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  # Always-on, no-LLM checks: types, lint, build. Safe on forks.
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm run build
+
+  # End-to-end agent validation on PUBLIC targets only. Needs a logged-in LLM
+  # CLI, so it runs only when ANTHROPIC_API_KEY is present and not on forks
+  # (the `claude` CLI reads the key itself — this repo stores no API keys).
+  validate:
+    needs: checks
+    runs-on: ubuntu-latest
+    if: ${{ github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository }}
+    env:
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      # SauceDemo demo credentials are public knowledge (PRD §13: creds via env).
+      SAUCE_USER: standard_user
+      SAUCE_PASS: secret_sauce
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Skip if no LLM key configured
+        id: gate
+        run: |
+          if [ -z "$ANTHROPIC_API_KEY" ]; then
+            echo "No ANTHROPIC_API_KEY secret — skipping agent validation."
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - run: npm ci
+        if: steps.gate.outputs.run == 'true'
+
+      - run: npm run build
+        if: steps.gate.outputs.run == 'true'
+
+      - name: Install Playwright browsers
+        if: steps.gate.outputs.run == 'true'
+        run: npx playwright install --with-deps chromium
+
+      - name: Install Claude CLI (local LLM provider)
+        if: steps.gate.outputs.run == 'true'
+        run: npm install -g @anthropic-ai/claude-code
+
+      - name: ata validate (public targets, auto-approve, --bare)
+        if: steps.gate.outputs.run == 'true'
+        run: node dist/cli/index.js validate

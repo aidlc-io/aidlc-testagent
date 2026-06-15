@@ -1,0 +1,30 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+*.tsbuildinfo
+
+# Secrets & private targets (NEVER commit) — see PRD §13
+targets/private.yaml
+targets/private/
+.env
+.env.*
+!.env.example
+.auth/
+
+# Agent output (committed only for public targets; see PRD §16)
+generated/
+
+# Playwright
+test-results/
+playwright-report/
+blob-report/
+.playwright/
+
+# OS / editor
+.DS_Store
+*.log
+.idea/
+.vscode/
+.npmrc

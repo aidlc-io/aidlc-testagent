@@ -1,0 +1,29 @@
+# targets/private.example.yaml — TEMPLATE for internal apps (PRD §13).
+#
+# Copy this into targets/private/<name>.target.yaml (the targets/private/ folder
+# is gitignored) and fill it in. NEVER commit real internal URLs, binaries,
+# flows, or credentials. Credentials are read from env vars named here — never
+# put credential VALUES in YAML.
+#
+#   cp targets/private.example.yaml targets/private/hue-desktop.target.yaml
+#
+# Example: an internal Electron desktop app on staging.
+name: hue-desktop
+adapter: playwright-electron
+executable: ./apps/hue/dist/Hue.app/Contents/MacOS/Hue
+perception: dom
+
+auth:
+  strategy: form
+  credentials_env: HUE_USER, HUE_PASS # set these in your shell / CI secrets
+  store_state: .auth/hue-desktop.json
+
+context:
+  requirements: [docs/requirements/**/*.md]
+  manual_tests: [test-cases/**/*.md]
+  business: [docs/domain/*.md]
+
+success:
+  min_scenarios: 3
+  must_pass: true
+  max_heal_attempts: 2
