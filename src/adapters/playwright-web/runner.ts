@@ -7,7 +7,7 @@
  * of its runs pass; mixed results are quarantined (PRD §5.4).
  */
 
-import { writeFileSync, symlinkSync, existsSync } from 'node:fs';
+import { writeFileSync, readFileSync, symlinkSync, existsSync } from 'node:fs';
 import { basename, dirname, join, sep } from 'node:path';
 import { createRequire } from 'node:module';
 import type {
@@ -84,13 +84,19 @@ export default defineConfig({
   fullyParallel: false,
   workers: 1,
   timeout: ${execOpts.timeoutMs},
-  reporter: [['json']],
+  reporter: [['json', { outputFile: ${JSON.stringify(reportPath(workdir))} }]],
   use: ${JSON.stringify(use, null, 2)},
 });
 `;
   const configPath = join(workdir, 'playwright.config.ts');
   writeFileSync(configPath, config, 'utf8');
   return configPath;
+}
+
+/** Absolute path the JSON reporter writes to — read from a file, not stdout
+ *  (stdout can be empty/polluted, and is lost if the process is killed). */
+function reportPath(workdir: string): string {
+  return join(workdir, '.pw-report.json');
 }
 
 interface JsonResult {
@@ -159,13 +165,16 @@ export async function runStabilitySuite(
     },
   });
 
+  const reportFile = reportPath(execOpts.workdir);
   let report: JsonReport;
   try {
-    report = JSON.parse(extractJson(res.stdout)) as JsonReport;
+    const raw = existsSync(reportFile) ? readFileSync(reportFile, 'utf8') : res.stdout;
+    report = JSON.parse(extractJson(raw)) as JsonReport;
   } catch {
+    const killed = res.timedOut ? ' (runner timed out)' : res.signal ? ` (killed: ${res.signal})` : '';
     throw new Error(
-      `Could not parse Playwright JSON report (exit ${res.code}).\n` +
-        `stdout: ${res.stdout.slice(0, 800)}\nstderr: ${res.stderr.slice(0, 800)}`,
+      `Could not read Playwright JSON report${killed} (exit ${res.code}). ` +
+        `Expected ${reportFile}.\nstderr: ${res.stderr.slice(0, 800) || '(empty)'}\nstdout: ${res.stdout.slice(0, 400) || '(empty)'}`,
     );
   }
 
