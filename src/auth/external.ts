@@ -33,11 +33,16 @@ export async function runExternalAuth(args: RunExternalArgs): Promise<void> {
     readCredentials(auth);
   }
 
-  const [bin, ...rest] = command;
   const cwd = auth.cwd ? (isAbsolute(auth.cwd) ? auth.cwd : resolve(baseDir, auth.cwd)) : baseDir;
 
+  // Run through the user's login shell so PATH-managed tools (npx/yarn/tsx via
+  // nvm/fnm/volta/asdf) resolve exactly as they do in the terminal — avoids
+  // "spawn npx ENOENT" when the binary lives on an interactive-only PATH.
+  const shell = process.env.SHELL || '/bin/sh';
+  const cmdString = command.map(shellQuote).join(' ');
+
   logger.info(`Running external pre-auth: ${command.join(' ')} (cwd ${cwd})`);
-  const res = await runCommand(bin!, rest, {
+  const res = await runCommand(shell, ['-lc', cmdString], {
     cwd,
     timeoutMs: args.timeoutMs ?? 300_000,
   });
@@ -54,4 +59,10 @@ export async function runExternalAuth(args: RunExternalArgs): Promise<void> {
     );
   }
   logger.info('External pre-auth completed.');
+}
+
+/** Quote an argument for safe inclusion in a shell command string. */
+function shellQuote(arg: string): string {
+  if (/^[A-Za-z0-9_\-./=:@]+$/.test(arg)) return arg;
+  return `'${arg.replace(/'/g, `'\\''`)}'`;
 }
