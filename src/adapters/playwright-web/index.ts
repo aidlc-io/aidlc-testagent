@@ -23,6 +23,7 @@ import type {
 import { perceive } from './perception.js';
 import { generateTests } from './generate.js';
 import { runStabilitySuite } from './runner.js';
+import { formLogin } from './login.js';
 import { readCredentials } from '../../auth/credentials.js';
 
 const WEB_SURFACE_GUIDE = `This is a WEB target. The @playwright/test "page" fixture is provided to each test.
@@ -88,7 +89,7 @@ export class WebAdapter implements TestAdapter {
 
     if (auth.strategy === 'form') {
       const creds = readCredentials(auth);
-      await heuristicFormLogin(page, creds.username ?? '', creds.password ?? '');
+      await formLogin(page, creds.username ?? '', creds.password ?? '', this.deps.logger);
     } else if (auth.strategy === 'api') {
       throw new Error(`auth.strategy "api" is not implemented for web in Phase 1 (use "form").`);
     }
@@ -133,32 +134,6 @@ export class WebAdapter implements TestAdapter {
     this.page = undefined;
     this.browser = undefined;
   }
-}
-
-/** Best-effort generic form login: fill the password field + the field before it,
- *  then submit. Works for simple login forms (e.g. SauceDemo). */
-async function heuristicFormLogin(page: Page, username: string, password: string): Promise<void> {
-  const pwd = page.locator('input[type="password"]').first();
-  await pwd.waitFor({ state: 'visible', timeout: 15_000 });
-  const user = page
-    .locator(
-      'input:not([type="password"]):not([type="hidden"]):not([type="submit"]):not([type="checkbox"]):not([type="radio"])',
-    )
-    .first();
-  if (await user.count()) await user.fill(username);
-  await pwd.fill(password);
-
-  const submit = page
-    .locator(
-      'button[type="submit"], input[type="submit"], #login-button, button:has-text("Login"), button:has-text("Log in"), button:has-text("Sign in")',
-    )
-    .first();
-  if (await submit.count()) {
-    await submit.click();
-  } else {
-    await pwd.press('Enter');
-  }
-  await page.waitForLoadState('networkidle', { timeout: 10_000 }).catch(() => undefined);
 }
 
 export function createWebAdapter(deps: AdapterDeps): TestAdapter {

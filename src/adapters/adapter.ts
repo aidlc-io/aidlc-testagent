@@ -30,13 +30,19 @@ export type PerceptionKind = 'dom' | 'schema' | 'accessibility';
 /** How the agent authenticates against a target. Credentials are NEVER in YAML;
  *  `credentialsEnv` names the env vars to read at run time (PRD §7, §13). */
 export interface AuthConfig {
-  strategy: 'form' | 'none' | 'api' | 'reuse-state';
+  strategy: 'form' | 'none' | 'api' | 'reuse-state' | 'external';
   /** Optional natural-language description of the login flow (a Markdown file). */
   stepsFrom?: string;
   /** Names of env vars holding the credentials, in order (e.g. user, pass). */
   credentialsEnv?: string[];
   /** Where to persist/reuse the session (Playwright storageState). Gitignored. */
   storeState?: string;
+  /** For `strategy: external` — a user-supplied pre-auth command run BEFORE the
+   *  app is launched (e.g. seed an app-data token). Keeps bespoke auth out of
+   *  the generic agent. Credentials reach it via the environment. */
+  command?: string[];
+  /** Working directory for the external command (relative to the config base). */
+  cwd?: string;
 }
 
 /** Grounding context sources, ordered by trust: intent before implementation

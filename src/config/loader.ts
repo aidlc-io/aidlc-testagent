@@ -107,22 +107,25 @@ export function loadConfig(cwd: string, explicitPath?: string): ResolvedConfig {
   }
   const root = rootParsed.data;
 
-  // Resolve include: globs -> per-target files.
+  // Resolve include: globs -> per-target files. An include that matches nothing
+  // is fine (e.g. you have only public or only private targets); we only fail if
+  // NO include matched anything at all.
   const targetPaths: string[] = [];
+  const emptyIncludes: string[] = [];
   for (const { include } of root.targets) {
     const matches = globSync(include, { cwd: baseDir, absolute: true, nodir: true });
     if (matches.length === 0) {
-      // A missing include is only OK for optional private files (gitignored).
-      const isOptionalPrivate = /private/i.test(include);
-      if (!isOptionalPrivate) {
-        throw new ConfigError(
-          `targets include "${include}" matched no files (resolved from ${baseDir}). ` +
-            `Fix the glob or remove the entry.`,
-        );
-      }
+      emptyIncludes.push(include);
       continue;
     }
     targetPaths.push(...matches);
+  }
+  if (targetPaths.length === 0 && root.targets.length > 0) {
+    throw new ConfigError(
+      `No target files matched any include (resolved from ${baseDir}):\n` +
+        emptyIncludes.map((i) => `  • ${i}`).join('\n') +
+        `\nAdd a target (e.g. \`ata config add\`) or fix the globs.`,
+    );
   }
 
   const seen = new Set<string>();

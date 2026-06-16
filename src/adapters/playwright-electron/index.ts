@@ -25,6 +25,8 @@ import { WebAdapter } from '../playwright-web/index.js';
 import { perceive } from '../playwright-web/perception.js';
 import { generateTests } from '../playwright-web/generate.js';
 import { runStabilitySuite } from '../playwright-web/runner.js';
+import { formLogin } from '../playwright-web/login.js';
+import { readCredentials } from '../../auth/credentials.js';
 
 export class ElectronAdapter extends WebAdapter {
   private app?: ElectronApplication;
@@ -71,14 +73,68 @@ Do NOT use baseURL or page.goto — Electron has no URL.`;
   }
 
   override async authenticate(auth: AuthConfig): Promise<SessionState> {
-    // Electron apps persist their own session state; Phase 1 supports no-auth
-    // and best-effort in-window login without external storageState.
-    if (auth.strategy !== 'none') {
-      this.deps.logger.warn(
-        `electron auth strategy "${auth.strategy}" is best-effort in Phase 1 (no storageState persistence).`,
-      );
+    const createdAt = new Date().toISOString();
+    const logger = this.deps.logger;
+
+    if (auth.strategy === 'none') {
+      return { strategy: 'none', reused: false, createdAt };
     }
-    return { strategy: auth.strategy, reused: false, createdAt: new Date().toISOString() };
+    if (auth.strategy !== 'form') {
+      logger.warn(`electron auth strategy "${auth.strategy}" is not supported in Phase 1; skipping login.`);
+      return { strategy: auth.strategy, reused: false, createdAt };
+    }
+
+    const creds = readCredentials(auth);
+    const window = await this.ensureWindow();
+    const app = this.app!;
+
+    // The login screen typically shows a "LOG IN" / "Sign in" trigger that may
+    // either navigate this window or open a new (SSO) window.
+    const trigger = window
+      .getByRole('button', { name: /log ?in|sign ?in/i })
+      .or(window.getByText(/^\s*(log ?in|sign ?in)\s*$/i))
+      .first();
+
+    const hasTrigger = (await trigger.count().catch(() => 0)) > 0;
+    if (!hasTrigger) {
+      logger.info('No login trigger found — Kelvin appears already authenticated.');
+    } else {
+      logger.info('Clicking the login trigger…');
+      const newWindowPromise = app.waitForEvent('window', { timeout: 12_000 }).catch(() => null);
+      await trigger.click().catch(() => undefined);
+      const ssoWindow = await newWindowPromise;
+      const loginSurface = ssoWindow ?? window;
+      if (ssoWindow) logger.info('SSO opened a new window; driving the login form there.');
+
+      try {
+        await loginSurface.waitForLoadState('domcontentloaded').catch(() => undefined);
+        await formLogin(loginSurface, creds.username ?? '', creds.password ?? '', logger);
+        logger.info('Submitted credentials; waiting for the app to return…');
+      } catch (e) {
+        logger.warn(
+          `Could not complete the Electron login automatically: ${(e as Error).message}. ` +
+            `The flow may hand off to the external system browser, which Phase 1 cannot drive.`,
+        );
+      }
+      await window.waitForLoadState('networkidle', { timeout: 15_000 }).catch(() => undefined);
+    }
+
+    // Best-effort session capture. Electron also persists its own session in the
+    // app's userData, so a later relaunch is typically still authenticated.
+    let storageState: unknown;
+    try {
+      storageState = await app.context().storageState();
+    } catch {
+      /* not all Electron apps expose a capturable storageState */
+    }
+
+    return {
+      strategy: auth.strategy,
+      storageState,
+      storageStatePath: this.deps.authStatePath,
+      reused: false,
+      createdAt,
+    };
   }
 
   override async generate(

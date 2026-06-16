@@ -10,6 +10,7 @@
 
 import type { Logger, SessionState, TargetConfig, TestAdapter } from '../adapters/adapter.js';
 import { readCredentials } from './credentials.js';
+import { runExternalAuth } from './external.js';
 import {
   hasStoredSession,
   loadStorageState,
@@ -19,6 +20,7 @@ import {
 
 export * from './credentials.js';
 export * from './session-store.js';
+export * from './external.js';
 
 export interface EnsureSessionArgs {
   adapter: TestAdapter;
@@ -40,6 +42,14 @@ export async function ensureSession(args: EnsureSessionArgs): Promise<SessionSta
 
   if (!auth || auth.strategy === 'none') {
     return undefined;
+  }
+
+  // External pre-auth: run the user's script (e.g. seed an app-data token), then
+  // let the adapter launch the already-authenticated app. The script self-caches
+  // if it wants to; we run it each time and never touch its secrets.
+  if (auth.strategy === 'external') {
+    await runExternalAuth({ auth, baseDir, logger });
+    return { strategy: 'external', reused: false, createdAt: new Date().toISOString() };
   }
 
   const statePath = sessionStatePath(target, baseDir);

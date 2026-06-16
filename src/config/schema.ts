@@ -37,18 +37,31 @@ const globList = z.array(z.string()).optional();
 
 export const authSchema = z
   .object({
-    strategy: z.enum(['form', 'none', 'api', 'reuse-state']),
+    strategy: z.enum(['form', 'none', 'api', 'reuse-state', 'external']),
     steps_from: z.string().optional(),
     credentials_env: envNameList.optional(),
     store_state: z.string().optional(),
+    command: z.array(z.string()).optional(),
+    cwd: z.string().optional(),
   })
   .strict()
+  .superRefine((a, ctx) => {
+    if (a.strategy === 'external' && (!a.command || a.command.length === 0)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'auth.strategy "external" requires a non-empty "command" array',
+        path: ['command'],
+      });
+    }
+  })
   .transform(
     (a): AuthConfig => ({
       strategy: a.strategy,
       stepsFrom: a.steps_from,
       credentialsEnv: a.credentials_env,
       storeState: a.store_state,
+      command: a.command,
+      cwd: a.cwd,
     }),
   );
 
