@@ -76,9 +76,13 @@ export class ClaudeCliProvider implements LlmProvider {
     if (req.schema) args.push('--json-schema', JSON.stringify(req.schema));
     if (this.bare) args.push('--strict-mcp-config');
 
+    // Strip ANTHROPIC_API_KEY so `claude` falls back to its OAuth session.
+    // If a key is present in the shell env, claude prefers it over OAuth; an
+    // invalid or mismatched key causes "Invalid API key".
     const res = await runCommand(this.command, args, {
       stdin: req.prompt,
       timeoutMs: this.timeoutMs,
+      omitEnv: ['ANTHROPIC_API_KEY'],
     });
 
     if (res.timedOut) {

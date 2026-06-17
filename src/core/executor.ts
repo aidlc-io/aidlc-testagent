@@ -20,6 +20,7 @@ export interface ExecuteArgs {
   adapter: TestAdapter;
   tests: GeneratedTest[];
   workdir: string;
+  outputDir?: string;
   runs: number;
   timeoutMs: number;
   quarantine: boolean;
@@ -29,7 +30,7 @@ export interface ExecuteArgs {
 }
 
 export async function execute(args: ExecuteArgs): Promise<ExecutionResult> {
-  const { adapter, tests, workdir, runs, timeoutMs, quarantine, session, headed, logger } = args;
+  const { adapter, tests, workdir, outputDir, runs, timeoutMs, quarantine, session, headed, logger } = args;
 
   if (tests.length === 0) {
     return { passed: [], failed: [], quarantined: [], total: 0 };
@@ -40,6 +41,7 @@ export async function execute(args: ExecuteArgs): Promise<ExecutionResult> {
     runs,
     timeoutMs,
     workdir,
+    outputDir,
     session,
     headed,
   });

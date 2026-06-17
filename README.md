@@ -1,5 +1,8 @@
 # aidlc-testagent
 
+[![npm](https://img.shields.io/npm/v/aidlc-testagent)](https://www.npmjs.com/package/aidlc-testagent)
+[![license](https://img.shields.io/npm/l/aidlc-testagent)](LICENSE)
+
 > **Point it at a target, approve the plan, get a passing test suite back.**
 
 An open-source AI test agent for **web**, **Electron desktop**, **REST API**, and
@@ -82,6 +85,7 @@ ata run saucedemo --diff main                               # flows near a git d
 ata run todomvc --yes                                       # skip the confirmation prompt
 ata run todomvc --dry-run                                   # generate only, skip execution
 ata run todomvc --plan generated/todomvc/plan.json          # generate from an approved/edited plan
+ata run todomvc --reuse                                     # skip plan+generate, run existing specs
 ```
 
 ## Configuration
@@ -126,6 +130,8 @@ scope:
 success:
   min_scenarios: 3
   must_pass: true
+# output_dir: ../other-repo/tests/ata-generated   # write specs to an external repo
+# surface_guide: "Custom Playwright guidance…"    # override LLM surface prompt
 ```
 
 Don't want to learn the schema? Run `ata config` — it auto-detects your stack
@@ -143,10 +149,12 @@ Zod schema** the loader uses, and never overwrites files silently.
 | `ata run <target>` | `plan → confirm → generate → execute → heal` |
 | `ata list` | List configured targets and adapters |
 | `ata config [add\|target <name>\|show]` | Interactive wizard / inspect effective config |
+| `ata ask <prompt>` | Ask the AI a question about config or setup (answers in plain language) |
+| `ata guide` | Print a step-by-step getting-started reference |
 | `ata report <target>` | Requirement → test traceability matrix (Phase 2) |
 
 Flags: `--feature <file>`, `--scope <name>`, `--diff <ref>`, `--yes`,
-`--plan <file>`, `--dry-run`, `--headed`, `--refresh-auth`, `-c/--config <path>`.
+`--plan <file>`, `--dry-run`, `--reuse`, `--headed`, `--refresh-auth`, `-c/--config <path>`.
 
 Approval: an interactive TTY prompts to confirm/edit/abort; `--yes` (or
 `approval: auto`) skips it; CI / non-TTY auto-approve so pipelines never hang on

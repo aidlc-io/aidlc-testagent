@@ -13,8 +13,10 @@ export interface SpawnOptions {
   stdin?: string;
   /** Milliseconds before the child is killed. */
   timeoutMs?: number;
-  /** Extra environment variables. */
+  /** Extra environment variables (merged on top of process.env after omitEnv is applied). */
   env?: NodeJS.ProcessEnv;
+  /** Env var names to strip from the inherited process.env before merging `env`. */
+  omitEnv?: string[];
   /** Working directory for the child process. */
   cwd?: string;
 }
@@ -37,13 +39,15 @@ export function runCommand(
   args: string[],
   opts: SpawnOptions = {},
 ): Promise<SpawnResult> {
-  const { stdin, timeoutMs = 120_000, env, cwd } = opts;
+  const { stdin, timeoutMs = 120_000, env, omitEnv, cwd } = opts;
 
   return new Promise((resolvePromise, reject) => {
     let child;
     try {
+      const baseEnv: NodeJS.ProcessEnv = { ...process.env };
+      if (omitEnv) omitEnv.forEach((k) => delete baseEnv[k]);
       child = spawn(command, args, {
-        env: { ...process.env, ...env },
+        env: { ...baseEnv, ...env },
         stdio: ['pipe', 'pipe', 'pipe'],
         ...(cwd ? { cwd } : {}),
       });

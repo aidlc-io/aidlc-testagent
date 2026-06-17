@@ -14,7 +14,7 @@
 
 import { Command } from 'commander';
 import { loadConfig, ConfigError, type ResolvedConfig } from '../config/loader.js';
-import { createLlmProvider } from '../core/llm/index.js';
+import { createLlmProvider, ClaudeCliProvider } from '../core/llm/index.js';
 import type { LlmProvider } from '../core/llm/provider.js';
 import { ConsoleLogger } from '../core/logger.js';
 import { runTarget, type OrchestratorDeps, type RunOptions, type TargetRunResult } from '../core/orchestrator.js';
@@ -111,6 +111,7 @@ program
   .option('--yes', 'approve the proposed pipeline without prompting')
   .option('--plan <plan-file>', 'generate from an edited/approved plan (plan.json or plan.md)')
   .option('--dry-run', 'plan + generate only, skip execution')
+  .option('--reuse', 'skip plan + generate if spec files already exist; run existing scripts')
   .option('--headed', 'run browsers headed (debug)')
   .option('--refresh-auth', 'ignore any stored session and re-authenticate')
   .action(async (name: string, cmdOpts: RunFlags, cmd: Command) => {
@@ -126,6 +127,7 @@ program
         yes: cmdOpts.yes,
         editedPlanPath: cmdOpts.plan,
         dryRun: cmdOpts.dryRun,
+        reuseScripts: cmdOpts.reuse,
         headed: cmdOpts.headed,
         forceAuthRefresh: cmdOpts.refreshAuth,
       },
@@ -195,6 +197,181 @@ program
     );
   });
 
+// --- ask -------------------------------------------------------------------
+const CONFIG_SCHEMA_REFERENCE = `
+## testagent.config.yaml (root manifest)
+\`\`\`yaml
+version: 1
+env: staging-only          # staging-only | any  (staging-only blocks prod URLs)
+allow_hosts: []            # extra hosts to allow under staging-only
+llm:
+  provider: claude-cli     # claude-cli | gemini-cli | codex-cli | ollama | custom
+  model: claude-sonnet-4-6 # optional model override
+  bare: false
+  max_turns: 1
+defaults:
+  max_heal_attempts: 2
+  timeout_ms: 30000
+  approval: prompt         # prompt | auto | manual-edit
+  max_budget_usd: 2.00
+  stability:
+    runs: 3
+    quarantine: true
+targets:
+  - include: targets/public/*.target.yaml
+  - include: targets/private/*.target.yaml   # gitignored
+\`\`\`
+
+## targets/<name>.target.yaml (per-target)
+\`\`\`yaml
+name: my-app               # slug: letters, digits, -, _
+adapter: playwright-web    # playwright-web | playwright-electron | rest-api | appium-ios
+url: https://staging.myapp.com    # required for playwright-web
+# executable: /path/to/app       # required for playwright-electron
+# spec: openapi.yaml             # required for rest-api
+# base_url: https://...          # required for rest-api
+# app: MyApp.app                 # required for appium-ios
+perception: dom            # dom | accessibility | schema
+
+auth:
+  strategy: form           # form | none | api | reuse-state | external
+  credentials_env: [MY_USER_ENV, MY_PASS_ENV]   # env var NAMES — never values
+  store_state: .auth/my-app.json                # reusable session cache
+
+context:                   # trust order: requirements > manual_tests > business > source
+  requirements: [docs/requirements/*.md]
+  manual_tests: [test-cases/*.md]
+  business: [docs/business-rules.md]
+  source: [src/**/*.ts]
+
+scope:
+  feature: checkout        # restrict to one named feature
+  requirement: docs/requirements/checkout.md
+
+success:
+  min_scenarios: 3
+  must_pass: true
+  max_heal_attempts: 2
+
+output_dir: ../other-repo/tests/ata-generated   # write specs to an external repo
+\`\`\`
+
+## Key rules
+- Credentials: always env var names in credentials_env, NEVER hardcoded values
+- output_dir: use when ata writes specs into a separate codebase (e.g. Kelvin lhappautotest)
+- context.requirements has highest trust — put your spec/PRD files here
+- staging-only blocks production URLs to prevent accidental prod writes
+- .auth/ directory should be in .gitignore
+`;
+
+program
+  .command('ask <prompt>')
+  .description('ask the AI a question about ata config or setup')
+  .action(async (userPrompt: string, _opts: unknown, cmd: Command) => {
+    // Try loading the project config; fall back gracefully if not set up yet.
+    let cfg: ResolvedConfig | null = null;
+    let llm: LlmProvider;
+    try {
+      cfg = loadCfg(cmd);
+      llm = createLlmProvider(cfg.llm);
+    } catch {
+      // No config yet — use default claude-cli so the user can still ask questions.
+      llm = new ClaudeCliProvider({});
+    }
+
+    // Preflight — make sure the CLI is available.
+    try {
+      await llm.preflight();
+    } catch (e) {
+      console.error(`✖ LLM not available: ${(e as Error).message}`);
+      process.exit(1);
+    }
+
+    // Build system context.
+    const currentConfigSection = cfg
+      ? `\n## Current project config\n\`\`\`json\n${JSON.stringify(
+          {
+            env: cfg.env,
+            llm: cfg.llm,
+            defaults: cfg.defaults,
+            targets: cfg.targets,
+          },
+          null,
+          2,
+        )}\n\`\`\`\n`
+      : '\n## Current project config\n(no config found — user may be setting up from scratch)\n';
+
+    const system =
+      `You are a configuration advisor for ata (aidlc-testagent), an AI test agent that ` +
+      `observes a running target (web, Electron, REST API, or iOS), proposes a test plan, generates ` +
+      `real test specs, and executes them with a stability gate and self-healing.\n` +
+      `Answer the user's question concisely and practically. When showing config, output ` +
+      `valid YAML the user can copy directly. Prefer concrete examples over abstract descriptions.` +
+      CONFIG_SCHEMA_REFERENCE +
+      currentConfigSection;
+
+    process.stderr.write('\n');
+    try {
+      const result = await llm.complete({ system, prompt: userPrompt });
+      console.log(result.text);
+    } catch (e) {
+      console.error(`✖ ${(e as Error).message}`);
+      process.exit(1);
+    }
+  });
+
+// --- guide -----------------------------------------------------------------
+program
+  .command('guide')
+  .description('step-by-step getting-started reference')
+  .action(() => {
+    console.log(`
+╔══════════════════════════════════════════════════════╗
+║          aidlc-testagent  —  Getting Started         ║
+╚══════════════════════════════════════════════════════╝
+
+ata observes a running target, proposes a test plan, generates
+real test specs, and executes them with a stability gate and
+self-healing.
+
+Supported surfaces:
+  • Web        (playwright-web)       — any browser-based app
+  • Electron   (playwright-electron)  — desktop apps via Electron
+  • REST API   (rest-api)             — OpenAPI/Swagger endpoints
+  • iOS        (appium-ios)           — native iOS apps via Appium
+
+── Step 1: Configure ─────────────────────────────────
+  ata config          interactive wizard (first time)
+  ata config add      add another target
+  ata list            see all configured targets
+  ata config show     print the resolved config
+
+── Step 2: Plan (no generation, no cost) ─────────────
+  ata plan <target>               propose + write plan.md
+  ata plan <target> --scope cart  scope to one feature
+
+── Step 3: Run ───────────────────────────────────────
+  ata run <target>                full loop (plan → generate → test)
+  ata run <target> --yes          auto-approve the plan
+  ata run <target> --reuse        skip generate, run existing specs
+  ata run <target> --dry-run      generate only, skip execution
+  ata run <target> --headed       open a visible browser (debug)
+  ata run <target> --plan p.md    generate from an edited plan
+
+── Step 4: CI gate ───────────────────────────────────
+  ata validate        run all targets, PASS/FAIL table, exit 1 on fail
+
+── Generated artifacts ───────────────────────────────
+  generated/<target>/plan.md          edit and re-run with --plan
+  generated/<target>/tests/*.spec.ts  committable Playwright specs
+
+── Useful env vars ───────────────────────────────────
+  ATA_VERBOSE=1        verbose logging (debug adapters, LLM calls)
+
+Run \`ata <command> --help\` for all flags on any command.
+`);
+  });
+
 // --- scope helpers ---------------------------------------------------------
 interface ScopeFlags {
   feature?: string;
@@ -205,6 +382,7 @@ interface RunFlags extends ScopeFlags {
   yes?: boolean;
   plan?: string;
   dryRun?: boolean;
+  reuse?: boolean;
   headed?: boolean;
   refreshAuth?: boolean;
 }

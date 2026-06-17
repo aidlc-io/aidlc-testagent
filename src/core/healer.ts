@@ -6,7 +6,7 @@
  * the spec, and re-runs through the stability gate — up to `max_heal_attempts`.
  */
 
-import { join } from 'node:path';
+import { isAbsolute, join } from 'node:path';
 import { readFileSync } from 'node:fs';
 import type {
   ExecOpts,
@@ -43,6 +43,7 @@ export interface HealArgs {
   failing: TestRunResult[];
   maxAttempts: number;
   workdir: string;
+  outputDir?: string;
   runs: number;
   timeoutMs: number;
   session?: SessionState;
@@ -81,7 +82,7 @@ export async function heal(args: HealArgs): Promise<HealResult> {
 
     if (repaired.length === 0) break;
 
-    const opts: ExecOpts = { runs, timeoutMs, workdir, session };
+    const opts: ExecOpts = { runs, timeoutMs, workdir, outputDir: args.outputDir, session };
     const result = await adapter.execute(repaired, opts);
 
     // Anything that now passes the stability gate is healed.
@@ -110,7 +111,10 @@ async function repairOne(
   // Prefer the on-disk content (it may have been healed already this run).
   let currentCode = failure.test.code;
   try {
-    currentCode = readFileSync(join(workdir, failure.test.filePath), 'utf8');
+    const absPath = isAbsolute(failure.test.filePath)
+      ? failure.test.filePath
+      : join(workdir, failure.test.filePath);
+    currentCode = readFileSync(absPath, 'utf8');
   } catch {
     /* fall back to in-memory code */
   }

@@ -101,6 +101,12 @@ export interface TargetConfig {
   scope?: ScopeConfig;
   success?: SuccessConfig;
   guardrails?: GuardrailConfig;
+  /** Override the adapter's default surface guide sent to the LLM generator. */
+  surface_guide?: string;
+  /** Absolute or base-relative path to write generated specs into (Kelvin only).
+   *  When set, specs land here instead of workdir/tests/ and the runner sets
+   *  testDir accordingly so lhappautotest fixtures resolve correctly. */
+  output_dir?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -243,6 +249,9 @@ export interface ExecOpts {
   timeoutMs: number;
   /** Absolute directory the specs are materialized into and run from. */
   workdir: string;
+  /** When set, specs live here (an external repo dir) and the runner sets testDir
+   *  to this path, using that repo's node_modules instead of the workdir symlink. */
+  outputDir?: string;
   headed?: boolean;
   session?: SessionState;
 }
@@ -299,6 +308,8 @@ export interface AdapterDeps {
    *  Adapters load it during explore/execute when present, and `authenticate`
    *  writes it. Keeps session handling out of `core/`. */
   authStatePath: string;
+  /** Config base dir — used by adapters to resolve context globs (e.g. oracle spec loading). */
+  baseDir: string;
 }
 
 /**

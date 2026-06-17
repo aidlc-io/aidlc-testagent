@@ -22,6 +22,7 @@ export function createLlmProvider(cfg: LlmConfig): LlmProvider {
       return new ClaudeCliProvider({
         model: cfg.model,
         bare: cfg.bare,
+        timeoutMs: cfg.timeout_ms,
       });
 
     case 'gemini-cli':

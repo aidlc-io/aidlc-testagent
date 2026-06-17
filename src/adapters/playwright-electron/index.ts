@@ -8,7 +8,10 @@
  * as the page.
  */
 
-import { dirname, isAbsolute, resolve } from 'node:path';
+import { dirname, isAbsolute, relative, resolve } from 'node:path';
+import { execSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
+import { globSync } from 'glob';
 import type { ElectronApplication, Page } from 'playwright';
 import type {
   AdapterDeps,
@@ -42,7 +45,34 @@ export class ElectronAdapter extends WebAdapter {
     return resolve(baseDir, exe);
   }
 
+  /** Load up to 8 oracle spec files from manual_tests context to give the LLM
+   *  real selectors and PageHelper usage patterns to copy from. */
+  private loadOracleSpecs(): string {
+    const manualTests = this.deps.target.context?.manualTests;
+    if (!manualTests?.length) return '';
+    const baseDir = this.deps.baseDir;
+
+    const seen = new Set<string>();
+    const parts: string[] = [];
+
+    for (const pattern of manualTests) {
+      const matches = globSync(pattern, { cwd: baseDir, absolute: true, nodir: true });
+      for (const abs of matches.sort()) {
+        if (seen.has(abs)) continue;
+        if (parts.length >= 8) break;
+        seen.add(abs);
+        try {
+          let content = readFileSync(abs, 'utf8');
+          if (content.length > 2_500) content = content.slice(0, 2_500) + '\n…[truncated]';
+          parts.push(`### ${relative(baseDir, abs)}\n\`\`\`typescript\n${content}\n\`\`\``);
+        } catch { /* skip unreadable */ }
+      }
+    }
+    return parts.join('\n\n');
+  }
+
   private surfaceGuide(): string {
+    if (this.deps.target.surface_guide) return this.deps.target.surface_guide;
     return `This is an ELECTRON desktop target. In each spec:
 - import { test, expect, _electron as electron } from '@playwright/test';
 - launch the app in the test: const app = await electron.launch({ executablePath: ${JSON.stringify(this.resolveExecutable())} });
@@ -54,9 +84,34 @@ Do NOT use baseURL or page.goto — Electron has no URL.`;
 
   private async ensureWindow(): Promise<Page> {
     if (this.window) return this.window;
+    const exe = this.resolveExecutable();
+
+    // Kill any lingering instance first (mirrors lhappautotest/electron-fixture.ts).
+    // Without this, a leftover process from a previous interrupted run causes
+    // `electron.launch()` to fail with "Process failed to launch!".
+    const appBaseName = exe.split('/').pop() ?? 'Kelvin';
+    try {
+      if (process.platform === 'win32') {
+        execSync(`taskkill /F /IM "${appBaseName}.exe" /T`, { stdio: 'ignore' });
+      } else {
+        execSync(`pkill -f "${appBaseName}" || true`, { stdio: 'ignore' });
+      }
+      this.deps.logger.debug(`Killed any existing "${appBaseName}" processes`);
+      await new Promise((r) => setTimeout(r, 2_000));
+    } catch {
+      // No process running — fine
+    }
+
     const { _electron } = await import('playwright');
-    this.deps.logger.debug(`Launching Electron app: ${this.resolveExecutable()}`);
-    this.app = await _electron.launch({ executablePath: this.resolveExecutable() });
+    this.deps.logger.debug(`Launching Electron app: ${exe}`);
+    // Strip ELECTRON_RUN_AS_NODE (set by the Claude Code / Electron shell that
+    // may be our parent process). When inherited, it makes Electron treat itself
+    // as a bare Node.js process instead of launching the GUI app, causing
+    // Playwright's CDP connection to fail with "Process failed to launch!".
+    const launchEnv = { ...process.env };
+    delete launchEnv['ELECTRON_RUN_AS_NODE'];
+    delete launchEnv['ELECTRON_NO_ATTACH_CONSOLE'];
+    this.app = await _electron.launch({ executablePath: exe, env: launchEnv as Record<string, string>, timeout: 200_000 });
     this.window = await this.app.firstWindow();
     return this.window;
   }
@@ -147,6 +202,7 @@ Do NOT use baseURL or page.goto — Electron has no URL.`;
         logger: this.deps.logger,
         target: this.deps.target,
         surfaceGuide: this.surfaceGuide(),
+        oracleSpecs: this.loadOracleSpecs(),
       },
       plan,
       perception,
@@ -154,7 +210,17 @@ Do NOT use baseURL or page.goto — Electron has no URL.`;
   }
 
   override async execute(tests: GeneratedTest[], opts: ExecOpts): Promise<ExecutionResult> {
-    // Electron specs self-launch; no baseURL or storageState injection.
+    // When specs live in an external repo (outputDir set), their beforeAll calls
+    // getElectronApp() via lhappautotest fixtures — close ata's own window first
+    // so the fixture doesn't race against an already-running Kelvin instance.
+    if (opts.outputDir && this.app) {
+      this.deps.logger.debug('Closing ata-managed Electron window before handing off to fixture-managed run…');
+      await this.app.close().catch(() => undefined);
+      this.app = undefined;
+      this.window = undefined;
+      // Brief pause to let the OS release the process socket before re-launch.
+      await new Promise((r) => setTimeout(r, 2_000));
+    }
     return runStabilitySuite(tests, opts, { logger: this.deps.logger });
   }
 

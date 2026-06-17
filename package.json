@@ -1,6 +1,6 @@
 {
   "name": "aidlc-testagent",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Open-source AI test agent for web, desktop, API & mobile. Point it at a target, approve the plan, get a passing test suite. No telemetry.",
   "license": "MIT",
   "type": "module",
@@ -8,13 +8,14 @@
     "node": ">=20"
   },
   "bin": {
-    "aidlc-testagent": "./dist/cli/index.js",
-    "ata": "./dist/cli/index.js"
+    "aidlc-testagent": "dist/cli/index.js",
+    "ata": "dist/cli/index.js"
   },
   "files": [
     "dist",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "CHANGELOG.md"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
@@ -24,6 +25,14 @@
     "lint:fix": "eslint \"src/**/*.ts\" --fix",
     "ata": "node --enable-source-maps --experimental-strip-types src/cli/index.ts",
     "test": "playwright test"
+  },
+  "homepage": "https://github.com/aidlc-io/aidlc-testagent#readme",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/aidlc-io/aidlc-testagent.git"
+  },
+  "bugs": {
+    "url": "https://github.com/aidlc-io/aidlc-testagent/issues"
   },
   "keywords": [
     "testing",

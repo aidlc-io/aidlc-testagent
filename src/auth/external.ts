@@ -42,7 +42,9 @@ export async function runExternalAuth(args: RunExternalArgs): Promise<void> {
   const cmdString = command.map(shellQuote).join(' ');
 
   logger.info(`Running external pre-auth: ${command.join(' ')} (cwd ${cwd})`);
-  const res = await runCommand(shell, ['-lc', cmdString], {
+  // -ilc = interactive + login: sources ~/.zshrc (and ~/.zprofile) so that
+  // PATH-managed tools and user-exported env vars (e.g. CF_APP_USER) are present.
+  const res = await runCommand(shell, ['-ilc', cmdString], {
     cwd,
     timeoutMs: args.timeoutMs ?? 300_000,
   });

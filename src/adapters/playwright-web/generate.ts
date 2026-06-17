@@ -85,6 +85,9 @@ export interface GenerateDeps {
   /** Surface-specific guidance appended to the prompt. Lets web and Electron
    *  share this generator while emitting correct page-acquisition code. */
   surfaceGuide?: string;
+  /** Content of oracle spec files (from manual_tests context) to learn real
+   *  selectors, PageHelper usage, and test data loading patterns from. */
+  oracleSpecs?: string;
 }
 
 export async function generateTests(
@@ -140,6 +143,8 @@ export async function generateTests(
       elementList || '(none captured)',
       '',
       deps.surfaceGuide ? `## Surface-specific guidance\n${deps.surfaceGuide}` : '',
+      '',
+      deps.oracleSpecs ? `## Oracle specs — copy selector patterns, PageHelper method usage, and test data loading from these real working specs:\n${deps.oracleSpecs}` : '',
       '',
       `## Scenario to generate (one self-contained spec file; keep helpers inline; no shared POMs)`,
       scenarioBlock,

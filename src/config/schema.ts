@@ -170,6 +170,8 @@ const targetBase = z
     scope: scopeSchema.optional(),
     success: successSchema.optional(),
     guardrails: guardrailSchema.optional(),
+    surface_guide: z.string().optional(),
+    output_dir: z.string().optional(),
   })
   .strict();
 
@@ -191,6 +193,8 @@ export const targetSchema = targetBase
       scope: t.scope,
       success: t.success,
       guardrails: t.guardrails,
+      surface_guide: t.surface_guide,
+      output_dir: t.output_dir,
     }),
   )
   .superRefine((t, ctx) => {
@@ -230,6 +234,7 @@ export const llmSchema = z
     model: z.string().optional(),
     bare: z.boolean().default(false),
     max_turns: z.number().int().positive().default(1),
+    timeout_ms: z.number().int().positive().optional(),
     // custom-provider fields (PRD §7a)
     command: z.array(z.string()).optional(),
     prompt_via: z.enum(['stdin', 'arg']).optional(),

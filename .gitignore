@@ -28,3 +28,4 @@ blob-report/
 .idea/
 .vscode/
 .npmrc
+.ast-graph/

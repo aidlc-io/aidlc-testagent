@@ -8,8 +8,8 @@
  * exceeds the budget. A target PASSES per PRD §8.
  */
 
-import { writeFileSync, mkdirSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { writeFileSync, mkdirSync, existsSync } from 'node:fs';
+import { dirname, isAbsolute, join, resolve } from 'node:path';
 import type {
   ExecutionResult,
   Logger,
@@ -26,7 +26,7 @@ import { createAdapter } from '../adapters/index.js';
 import { sessionStatePath, ensureSession } from '../auth/index.js';
 import { plan as planTarget, resolveScope } from './planner.js';
 import { confirmPlan, writePlanMarkdown, type ApprovalMode } from './pipeline.js';
-import { generate } from './generator.js';
+import { generate, hasExistingSpecs, loadExistingSpecs } from './generator.js';
 import { execute } from './executor.js';
 import { heal } from './healer.js';
 import { loadPlanFromFile } from './plan-io.js';
@@ -37,6 +37,8 @@ export interface RunOptions {
   mode: RunMode;
   /** Generate but skip execution. */
   dryRun?: boolean;
+  /** Skip plan + generate if spec files already exist under the target's output dir. */
+  reuseScripts?: boolean;
   /** Approve without prompting. */
   yes?: boolean;
   /** Generate from an edited/approved plan file (plan.json or plan.md sibling). */
@@ -78,6 +80,13 @@ export async function runTarget(
   const authStatePath = sessionStatePath(target, cfg.baseDir);
   mkdirSync(workdir, { recursive: true });
 
+  // Resolve the optional external spec output dir (e.g. lhappautotest/tests/ata-generated).
+  const outputDir = target.output_dir
+    ? isAbsolute(target.output_dir)
+      ? target.output_dir
+      : resolve(cfg.baseDir, target.output_dir)
+    : undefined;
+
   const maxBudget = cfg.defaults.max_budget_usd;
   const guard = new CostGuard(maxBudget);
   const llm = meteredProvider(deps.llm, guard);
@@ -93,9 +102,10 @@ export async function runTarget(
   let adapter: TestAdapter | undefined;
 
   try {
-    adapter = await createAdapter({ target, llm, logger, workdir, authStatePath });
+    adapter = await createAdapter({ target, llm, logger, workdir, authStatePath, baseDir: cfg.baseDir });
 
     // --- Auth (login once, reuse) -----------------------------------------
+    logger.info('[auth] Authenticating…');
     const session = await ensureSession({
       adapter,
       target,
@@ -104,34 +114,64 @@ export async function runTarget(
       forceRefresh: opts.forceAuthRefresh,
     });
 
-    // --- Explore (observe the running target) -----------------------------
-    logger.info('Exploring target…');
-    const perception = await adapter.explore(target);
+    // Determine specs location early (used for reuse check).
+    const specsDir = outputDir ?? join(workdir, 'tests');
+    const reuseExisting = opts.reuseScripts === true && hasExistingSpecs(specsDir);
 
-    // --- Plan (or load an edited plan) ------------------------------------
+    let perception: import('../adapters/adapter.js').PerceptionSnapshot;
     let testPlan: TestPlan;
     let fromEditedPlan = false;
-    if (opts.editedPlanPath) {
-      testPlan = loadPlanFromFile(opts.editedPlanPath, target.name);
-      fromEditedPlan = true;
-      logger.info(`Loaded edited plan: ${opts.editedPlanPath}`);
-    } else {
-      const scope = resolveScope(cfg, target, opts.scope);
-      testPlan = await planTarget({
-        cfg,
-        target,
-        perception,
-        llm,
-        logger,
-        scope,
-        minScenarios,
-        generatedAt: new Date().toISOString(),
-      });
-    }
 
-    // Persist the plan (human + machine forms).
-    writePlanMarkdown(testPlan, planMdPath);
-    writePlanJson(testPlan, planJsonPath);
+    if (reuseExisting) {
+      // --- Reuse mode: skip explore + LLM plan + generate ------------------
+      logger.info('[reuse] Existing specs found — skipping plan and generation…');
+      // Explore is still called to open the browser (needed for session context),
+      // but its output is not used for planning.
+      perception = await adapter.explore(target);
+
+      // Load the existing machine plan for result metadata; fall back to a stub.
+      if (existsSync(planJsonPath)) {
+        testPlan = loadPlanFromFile(planJsonPath, target.name);
+        logger.info(`[reuse] Loaded existing plan: ${planJsonPath}`);
+      } else {
+        testPlan = {
+          target: target.name,
+          summary: '(reused — no plan.json available)',
+          stages: [],
+          scenarios: [],
+          outOfScope: [],
+          generatedAt: new Date().toISOString(),
+        };
+      }
+    } else {
+      // --- Explore (observe the running target) ----------------------------
+      logger.info('[explore] Observing target…');
+      perception = await adapter.explore(target);
+
+      // --- Plan (or load an edited plan) -----------------------------------
+      if (opts.editedPlanPath) {
+        testPlan = loadPlanFromFile(opts.editedPlanPath, target.name);
+        fromEditedPlan = true;
+        logger.info(`[plan] Loaded edited plan: ${opts.editedPlanPath}`);
+      } else {
+        logger.info('[plan] Planning test scenarios…');
+        const scope = resolveScope(cfg, target, opts.scope);
+        testPlan = await planTarget({
+          cfg,
+          target,
+          perception,
+          llm,
+          logger,
+          scope,
+          minScenarios,
+          generatedAt: new Date().toISOString(),
+        });
+      }
+
+      // Persist the plan (human + machine forms).
+      writePlanMarkdown(testPlan, planMdPath);
+      writePlanJson(testPlan, planJsonPath);
+    }
 
     // --- Plan-only mode: stop here ----------------------------------------
     if (opts.mode === 'plan') {
@@ -143,26 +183,34 @@ export async function runTarget(
       ]);
     }
 
-    // --- Confirmation gate ------------------------------------------------
-    const approval = cfg.defaults.approval as ApprovalMode;
-    const confirm = await confirmPlan({
-      plan: testPlan,
-      approval,
-      yes: opts.yes ?? false,
-      fromEditedPlan,
-      isTty: opts.isTty,
-      isCi: opts.isCi,
-      logger,
-      planPath: planMdPath,
-    });
-    if (!confirm.approved) {
-      return baseResult(target.name, 'aborted', testPlan, guard, planMdPath, [
-        `not approved: ${confirm.reason}`,
-      ]);
-    }
+    // --- Generate (or reuse existing specs) --------------------------------
+    let tests: import('../adapters/adapter.js').GeneratedTest[];
 
-    // --- Generate ---------------------------------------------------------
-    const tests = await generate({ adapter, plan: testPlan, perception, workdir, logger });
+    if (reuseExisting) {
+      tests = loadExistingSpecs(specsDir, !!outputDir);
+      logger.info(`[reuse] Using ${tests.length} existing spec(s) from ${specsDir}`);
+    } else {
+      // Confirmation gate (only for fresh generation).
+      const approval = cfg.defaults.approval as ApprovalMode;
+      const confirm = await confirmPlan({
+        plan: testPlan,
+        approval,
+        yes: opts.yes ?? false,
+        fromEditedPlan,
+        isTty: opts.isTty,
+        isCi: opts.isCi,
+        logger,
+        planPath: planMdPath,
+      });
+      if (!confirm.approved) {
+        return baseResult(target.name, 'aborted', testPlan, guard, planMdPath, [
+          `not approved: ${confirm.reason}`,
+        ]);
+      }
+
+      logger.info(`[generate] Generating ${testPlan.scenarios.length} test spec(s)…`);
+      tests = await generate({ adapter, plan: testPlan, perception, workdir, outputDir, logger });
+    }
 
     if (opts.dryRun) {
       return baseResult(target.name, 'planned', testPlan, guard, planMdPath, [
@@ -171,10 +219,12 @@ export async function runTarget(
     }
 
     // --- Execute (+ stability gate) ---------------------------------------
+    logger.info(`[execute] Running ${tests.length} test(s) (${cfg.defaults.stability.runs} run(s) each)…`);
     let result: ExecutionResult = await execute({
       adapter,
       tests,
       workdir,
+      outputDir,
       runs: cfg.defaults.stability.runs,
       timeoutMs: cfg.defaults.timeout_ms,
       quarantine: cfg.defaults.stability.quarantine,
@@ -186,6 +236,7 @@ export async function runTarget(
     // --- Heal -------------------------------------------------------------
     let healedCount = 0;
     if (result.failed.length > 0 && maxHeal > 0) {
+      logger.info(`[heal] Attempting to repair ${result.failed.length} failing test(s)…`);
       const healResult = await heal({
         adapter,
         llm,
@@ -193,6 +244,7 @@ export async function runTarget(
         failing: result.failed,
         maxAttempts: maxHeal,
         workdir,
+        outputDir,
         runs: cfg.defaults.stability.runs,
         timeoutMs: cfg.defaults.timeout_ms,
         session,
