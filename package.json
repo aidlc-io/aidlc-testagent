@@ -29,7 +29,7 @@
   "homepage": "https://github.com/aidlc-io/aidlc-testagent#readme",
   "repository": {
     "type": "git",
-    "url": "https://github.com/aidlc-io/aidlc-testagent.git"
+    "url": "git+https://github.com/aidlc-io/aidlc-testagent.git"
   },
   "bugs": {
     "url": "https://github.com/aidlc-io/aidlc-testagent/issues"
