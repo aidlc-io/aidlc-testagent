@@ -294,6 +294,10 @@ scope:
   feature: checkout        # restrict to one named feature
   requirement: docs/requirements/checkout.md
 
+explore:
+  strategy: manual        # auto (default) | manual — navigate freely, agent auto-snaps
+  idle_timeout_ms: 2000   # ms of DOM quiet before snapping (default 2000)
+
 success:
   min_scenarios: 3
   must_pass: true
@@ -308,6 +312,9 @@ output_dir: ../other-repo/tests/ata-generated   # write specs to an external rep
 - context.requirements has highest trust — put your spec/PRD files here
 - staging-only blocks production URLs to prevent accidental prod writes
 - .auth/ directory should be in .gitignore
+- explore.strategy: manual — opens a headed browser; you navigate, agent auto-snaps each DOM-idle state; click "✅ Done" when finished; saves perception.json + .auth/<target>.json
+- --reuse-perception — skips re-exploring on plan/run by loading the saved perception.json
+- auth.strategy: reuse-state — pair with manual explore; session is auto-saved after "Done"
 `;
 
 program
@@ -392,9 +399,17 @@ Supported surfaces:
   ata list            see all configured targets
   ata config show     print the resolved config
 
+── Step 1b: Explore (for apps needing manual auth) ───
+  ata explore <target> --manual --headed
+                        navigate in browser, click ✅ Done when finished
+                        saves perception.json + .auth/<target>.json
+  ata explore <target>  auto explore (default, no browser interaction needed)
+
 ── Step 2: Plan (no generation, no cost) ─────────────
   ata plan <target>               propose + write plan.md
   ata plan <target> --scope cart  scope to one feature
+  ata plan <target> --reuse-perception   reuse saved perception, skip browser
+  ata plan <target> --manual --headed    explore manually then plan in one shot
 
 ── Step 3: Run ───────────────────────────────────────
   ata run <target>                full loop (plan → generate → test)
@@ -403,6 +418,8 @@ Supported surfaces:
   ata run <target> --dry-run      generate only, skip execution
   ata run <target> --headed       open a visible browser (debug)
   ata run <target> --plan p.md    generate from an edited plan
+  ata run <target> --reuse-perception    reuse saved perception, skip browser
+  ata run <target> --manual --headed     explore manually then run in one shot
 
 ── Step 4: CI gate ───────────────────────────────────
   ata validate        run all targets, PASS/FAIL table, exit 1 on fail
@@ -410,6 +427,7 @@ Supported surfaces:
 ── Generated artifacts ───────────────────────────────
   generated/<target>/plan.md          edit and re-run with --plan
   generated/<target>/tests/*.spec.ts  committable Playwright specs
+  generated/<target>/perception.json     multi-step journey; reuse with --reuse-perception
 
 ── Useful env vars ───────────────────────────────────
   ATA_VERBOSE=1        verbose logging (debug adapters, LLM calls)
