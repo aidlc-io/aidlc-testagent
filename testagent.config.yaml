@@ -13,7 +13,7 @@ defaults:
   max_heal_attempts: 2
   timeout_ms: 30000
   approval: prompt # prompt | auto | manual-edit
-  max_budget_usd: 2.00 # cost guard per target run; 0 = unlimited
+  max_budget_usd: 10.00 # cost guard per target run; 0 = unlimited
   stability:
     runs: 3 # run each new test N times; accept only if all pass
     quarantine: true # flaky tests -> quarantine, not the green suite

@@ -77,14 +77,14 @@ export function resolveScope(
   return { feature, requirementText, requirementRef, diffBase };
 }
 
-function renderPerception(p: PerceptionSnapshot): string {
-  const parts: string[] = [`Target: ${p.target} (${p.kind})`];
+function renderSingleSnapshot(p: PerceptionSnapshot, tokenBudget = 12_000): string {
+  const parts: string[] = [];
   if (p.url) parts.push(`URL: ${p.url}`);
   if (p.title) parts.push(`Title: ${p.title}`);
   if (p.accessibilityTree) {
-    parts.push(`Accessibility tree:\n${p.accessibilityTree.slice(0, 12_000)}`);
+    parts.push(`Accessibility tree:\n${p.accessibilityTree.slice(0, tokenBudget)}`);
   } else if (p.domSummary) {
-    parts.push(`DOM summary:\n${p.domSummary.slice(0, 12_000)}`);
+    parts.push(`DOM summary:\n${p.domSummary.slice(0, tokenBudget)}`);
   }
   if (p.elements?.length) {
     const els = p.elements
@@ -100,6 +100,26 @@ function renderPerception(p: PerceptionSnapshot): string {
   }
   if (p.notes?.length) parts.push(`Notes:\n${p.notes.map((n) => `- ${n}`).join('\n')}`);
   return parts.join('\n');
+}
+
+function renderPerception(p: PerceptionSnapshot): string {
+  // Manual explore: render each step so the planner sees the full journey and
+  // can infer preconditions (e.g. "step 2 requires auth from step 1").
+  if (p.steps?.length) {
+    const perStepBudget = Math.floor(8_000 / p.steps.length);
+    const lines = [
+      `Target: ${p.target} (${p.kind})`,
+      `Manual exploration session — ${p.steps.length} step(s) recorded:`,
+    ];
+    for (const [i, step] of p.steps.entries()) {
+      lines.push(`\n--- Step ${i + 1} ---`);
+      lines.push(renderSingleSnapshot(step, perStepBudget));
+    }
+    return lines.join('\n');
+  }
+
+  // Auto explore: single snapshot (original behaviour).
+  return [`Target: ${p.target} (${p.kind})`, renderSingleSnapshot(p)].join('\n');
 }
 
 function renderScope(scope: ResolvedScope | undefined): string {

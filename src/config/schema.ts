@@ -14,6 +14,7 @@ import { z } from 'zod';
 import type {
   AuthConfig,
   ContextConfig,
+  ExploreConfig,
   GuardrailConfig,
   ScopeConfig,
   SuccessConfig,
@@ -127,6 +128,21 @@ export const guardrailSchema = z
     }),
   );
 
+// --- explore ---------------------------------------------------------------
+
+export const exploreSchema = z
+  .object({
+    strategy: z.enum(['auto', 'manual']).default('auto'),
+    idle_timeout_ms: z.number().int().positive().optional(),
+  })
+  .strict()
+  .transform(
+    (e): ExploreConfig => ({
+      strategy: e.strategy,
+      idleTimeoutMs: e.idle_timeout_ms,
+    }),
+  );
+
 // --- target ----------------------------------------------------------------
 
 export const adapterKindSchema = z.enum([
@@ -170,6 +186,7 @@ const targetBase = z
     scope: scopeSchema.optional(),
     success: successSchema.optional(),
     guardrails: guardrailSchema.optional(),
+    explore: exploreSchema.optional(),
     surface_guide: z.string().optional(),
     output_dir: z.string().optional(),
   })
@@ -193,6 +210,7 @@ export const targetSchema = targetBase
       scope: t.scope,
       success: t.success,
       guardrails: t.guardrails,
+      explore: t.explore,
       surface_guide: t.surface_guide,
       output_dir: t.output_dir,
     }),

@@ -17,7 +17,7 @@ import { loadConfig, ConfigError, type ResolvedConfig } from '../config/loader.j
 import { createLlmProvider, ClaudeCliProvider } from '../core/llm/index.js';
 import type { LlmProvider } from '../core/llm/provider.js';
 import { ConsoleLogger } from '../core/logger.js';
-import { runTarget, type OrchestratorDeps, type RunOptions, type TargetRunResult } from '../core/orchestrator.js';
+import { runTarget, exploreTarget, type OrchestratorDeps, type RunOptions, type TargetRunResult } from '../core/orchestrator.js';
 import type { TargetConfig } from '../adapters/adapter.js';
 import { isCi, isInteractiveTty } from './env.js';
 import { renderRunResult, renderTargetList, renderValidateTable } from './render.js';
@@ -86,6 +86,36 @@ program
     process.exit(anyFail ? 1 : 0);
   });
 
+// --- explore ---------------------------------------------------------------
+program
+  .command('explore <target>')
+  .description('explore only: observe the target and save perception.json for reuse')
+  .option('--manual', 'override explore strategy to manual (navigate freely, press Enter when done)')
+  .option('--headed', 'run browsers headed (debug)')
+  .option('--refresh-auth', 'ignore any stored session and re-authenticate')
+  .action(async (name: string, cmdOpts: { manual?: boolean; headed?: boolean; refreshAuth?: boolean }, cmd: Command) => {
+    const cfg = loadCfg(cmd);
+    const target = findTarget(cfg, name);
+    const logger = new ConsoleLogger(Boolean(process.env.ATA_VERBOSE));
+    const llm = createLlmProvider(cfg.llm);
+    await llm.preflight();
+    const result = await exploreTarget(
+      target,
+      {
+        strategy: cmdOpts.manual ? 'manual' : undefined,
+        headed: cmdOpts.headed,
+        forceAuthRefresh: cmdOpts.refreshAuth,
+        logger,
+      },
+      { cfg, llm, logger },
+    );
+    console.error(
+      `\n✔ Explored "${result.target}" — ${result.stepCount} step(s) captured (${result.strategy}).\n` +
+        `  Saved to: ${result.perceptionPath}\n` +
+        `  Use --reuse-perception on plan/run to skip re-exploring.\n`,
+    );
+  });
+
 // --- plan ------------------------------------------------------------------
 program
   .command('plan <target>')
@@ -93,11 +123,23 @@ program
   .option('--feature <requirement-file>', 'scope to one feature described by a requirement file')
   .option('--scope <feature-name>', 'scope by a declared feature name')
   .option('--diff <base-ref>', 'scope to flows near a git diff (Phase 3; best-effort)')
-  .action(async (name: string, cmdOpts: ScopeFlags, cmd: Command) => {
+  .option('--manual', 'explore manually (navigate + press Enter) before planning')
+  .option('--reuse-perception', 'skip explore; load perception.json saved by `ata explore`')
+  .action(async (name: string, cmdOpts: ScopeFlags & { manual?: boolean; reusePerception?: boolean }, cmd: Command) => {
     const cfg = loadCfg(cmd);
     const target = findTarget(cfg, name);
     const deps = await makeDeps(cfg, { preflight: true });
-    const res = await runTarget(target, { ...baseRunOptions(), mode: 'plan', scope: toScope(cmdOpts) }, deps);
+    const res = await runTarget(
+      target,
+      {
+        ...baseRunOptions(),
+        mode: 'plan',
+        scope: toScope(cmdOpts),
+        exploreStrategy: cmdOpts.manual ? 'manual' : undefined,
+        reusePerception: cmdOpts.reusePerception,
+      },
+      deps,
+    );
     console.log(renderRunResult(res));
   });
 
@@ -112,6 +154,8 @@ program
   .option('--plan <plan-file>', 'generate from an edited/approved plan (plan.json or plan.md)')
   .option('--dry-run', 'plan + generate only, skip execution')
   .option('--reuse', 'skip plan + generate if spec files already exist; run existing scripts')
+  .option('--manual', 'explore manually (navigate + press Enter) before planning')
+  .option('--reuse-perception', 'skip explore; load perception.json saved by `ata explore`')
   .option('--headed', 'run browsers headed (debug)')
   .option('--refresh-auth', 'ignore any stored session and re-authenticate')
   .action(async (name: string, cmdOpts: RunFlags, cmd: Command) => {
@@ -128,6 +172,8 @@ program
         editedPlanPath: cmdOpts.plan,
         dryRun: cmdOpts.dryRun,
         reuseScripts: cmdOpts.reuse,
+        exploreStrategy: cmdOpts.manual ? 'manual' : undefined,
+        reusePerception: cmdOpts.reusePerception,
         headed: cmdOpts.headed,
         forceAuthRefresh: cmdOpts.refreshAuth,
       },
@@ -383,6 +429,8 @@ interface RunFlags extends ScopeFlags {
   plan?: string;
   dryRun?: boolean;
   reuse?: boolean;
+  manual?: boolean;
+  reusePerception?: boolean;
   headed?: boolean;
   refreshAuth?: boolean;
 }

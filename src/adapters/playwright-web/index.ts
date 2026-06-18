@@ -20,7 +20,7 @@ import type {
   TargetConfig,
   TestAdapter,
 } from '../adapter.js';
-import { perceive } from './perception.js';
+import { exploreManual, perceive } from './perception.js';
 import { generateTests } from './generate.js';
 import { runStabilitySuite } from './runner.js';
 import { formLogin } from './login.js';
@@ -40,7 +40,7 @@ export class WebAdapter implements TestAdapter {
   protected async launchBrowser(): Promise<Browser> {
     if (this.browser) return this.browser;
     const { chromium } = await import('playwright');
-    this.browser = await chromium.launch({ headless: true });
+    this.browser = await chromium.launch({ headless: !this.deps.headed });
     return this.browser;
   }
 
@@ -62,6 +62,9 @@ export class WebAdapter implements TestAdapter {
 
   async explore(target: TargetConfig): Promise<PerceptionSnapshot> {
     const page = await this.ensurePage();
+    if (target.explore?.strategy === 'manual') {
+      return exploreManual(page, target);
+    }
     if (target.url) {
       await page.goto(target.url, { waitUntil: 'domcontentloaded' }).catch(() => undefined);
       await page.waitForLoadState('networkidle', { timeout: 5_000 }).catch(() => undefined);
@@ -108,6 +111,10 @@ export class WebAdapter implements TestAdapter {
       reused: false,
       createdAt: new Date().toISOString(),
     };
+  }
+
+  async getStorageState(): Promise<unknown> {
+    return this.context?.storageState();
   }
 
   async generate(plan: Parameters<TestAdapter['generate']>[0], perception: PerceptionSnapshot): Promise<GeneratedTest[]> {

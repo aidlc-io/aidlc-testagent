@@ -25,7 +25,7 @@ import type {
   TestAdapter,
 } from '../adapter.js';
 import { WebAdapter } from '../playwright-web/index.js';
-import { perceive } from '../playwright-web/perception.js';
+import { exploreManual, perceive } from '../playwright-web/perception.js';
 import { generateTests } from '../playwright-web/generate.js';
 import { runStabilitySuite } from '../playwright-web/runner.js';
 import { formLogin } from '../playwright-web/login.js';
@@ -118,6 +118,9 @@ Do NOT use baseURL or page.goto — Electron has no URL.`;
 
   override async explore(target: TargetConfig): Promise<PerceptionSnapshot> {
     const window = await this.ensureWindow();
+    if (target.explore?.strategy === 'manual') {
+      return exploreManual(window, target);
+    }
     await window.waitForLoadState('domcontentloaded').catch(() => undefined);
     return perceive(window, target.name);
   }

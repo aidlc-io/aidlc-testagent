@@ -79,6 +79,13 @@ export interface GuardrailConfig {
   onDestructive?: 'confirm' | 'block' | 'allow';
 }
 
+/** Controls how the agent observes the target before planning. */
+export interface ExploreConfig {
+  strategy: 'auto' | 'manual';
+  /** ms to wait after each navigation before snapping (manual mode only, default 2000). */
+  idleTimeoutMs?: number;
+}
+
 /** A single target: what it is, how to reach it, what to ground on, how to
  *  authenticate, and what success means (PRD §7). */
 export interface TargetConfig {
@@ -101,6 +108,7 @@ export interface TargetConfig {
   scope?: ScopeConfig;
   success?: SuccessConfig;
   guardrails?: GuardrailConfig;
+  explore?: ExploreConfig;
   /** Override the adapter's default surface guide sent to the LLM generator. */
   surface_guide?: string;
   /** Absolute or base-relative path to write generated specs into (Kelvin only).
@@ -165,6 +173,8 @@ export interface PerceptionSnapshot {
   endpoints?: PerceivedEndpoint[];
   capturedAt: string;
   notes?: string[];
+  /** Sequential snapshots captured during a manual explore session. */
+  steps?: PerceptionSnapshot[];
 }
 
 // ---------------------------------------------------------------------------
@@ -310,6 +320,8 @@ export interface AdapterDeps {
   authStatePath: string;
   /** Config base dir — used by adapters to resolve context globs (e.g. oracle spec loading). */
   baseDir: string;
+  /** Launch browser in headed (visible) mode — used for manual explore and debug runs. */
+  headed?: boolean;
 }
 
 /**
@@ -331,6 +343,9 @@ export interface TestAdapter {
   execute(tests: GeneratedTest[], opts: ExecOpts): Promise<ExecutionResult>;
   /** Release resources (browsers, processes, temp dirs). */
   dispose(): Promise<void>;
+  /** Snapshot the current browser context's cookies/localStorage for session reuse.
+   *  Returns undefined on non-browser surfaces (REST, iOS). */
+  getStorageState?(): Promise<unknown>;
 }
 
 /** Factory signature every adapter module exports as `createAdapter`. */

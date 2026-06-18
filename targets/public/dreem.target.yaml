@@ -1,0 +1,19 @@
+name: dreem
+adapter: playwright-web
+url: https://dev.dreem.ai/
+perception: accessibility
+
+explore:
+  strategy: manual
+  idle_timeout_ms: 2000
+
+# Session saved during manual explore — reused by all generated specs.
+# Run: ata explore dreem --manual --headed  to refresh the session.
+auth:
+  strategy: reuse-state
+  store_state: .auth/dreem.json
+
+success:
+  min_scenarios: 3
+  must_pass: false   # first run: allow failures, review results
+  max_heal_attempts: 2

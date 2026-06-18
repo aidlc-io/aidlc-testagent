@@ -8,11 +8,12 @@
  * exceeds the budget. A target PASSES per PRD §8.
  */
 
-import { writeFileSync, mkdirSync, existsSync } from 'node:fs';
+import { writeFileSync, readFileSync, mkdirSync, existsSync } from 'node:fs';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import type {
   ExecutionResult,
   Logger,
+  PerceptionSnapshot,
   TargetConfig,
   TestAdapter,
   TestPlan,
@@ -46,6 +47,10 @@ export interface RunOptions {
   scope?: { feature?: string; requirementFile?: string; diffBase?: string };
   headed?: boolean;
   forceAuthRefresh?: boolean;
+  /** Load perception from generated/<target>/perception.json instead of re-exploring. */
+  reusePerception?: boolean;
+  /** Override explore strategy for this run only ('manual' | 'auto'). */
+  exploreStrategy?: 'auto' | 'manual';
   isTty: boolean;
   isCi: boolean;
 }
@@ -97,12 +102,13 @@ export async function runTarget(
 
   const planMdPath = join(workdir, 'plan.md');
   const planJsonPath = join(workdir, 'plan.json');
+  const perceptionJsonPath = join(workdir, 'perception.json');
 
   const reasons: string[] = [];
   let adapter: TestAdapter | undefined;
 
   try {
-    adapter = await createAdapter({ target, llm, logger, workdir, authStatePath, baseDir: cfg.baseDir });
+    adapter = await createAdapter({ target, llm, logger, workdir, authStatePath, baseDir: cfg.baseDir, headed: opts.headed });
 
     // --- Auth (login once, reuse) -----------------------------------------
     logger.info('[auth] Authenticating…');
@@ -145,8 +151,18 @@ export async function runTarget(
       }
     } else {
       // --- Explore (observe the running target) ----------------------------
-      logger.info('[explore] Observing target…');
-      perception = await adapter.explore(target);
+      if (opts.reusePerception && existsSync(perceptionJsonPath)) {
+        logger.info(`[explore] Reusing saved perception: ${perceptionJsonPath}`);
+        perception = JSON.parse(readFileSync(perceptionJsonPath, 'utf8')) as PerceptionSnapshot;
+      } else {
+        const effectiveTarget = opts.exploreStrategy
+          ? { ...target, explore: { ...target.explore, strategy: opts.exploreStrategy } }
+          : target;
+        logger.info('[explore] Observing target…');
+        perception = await adapter.explore(effectiveTarget);
+        writeFileSync(perceptionJsonPath, JSON.stringify(perception, null, 2));
+        logger.debug(`[explore] Perception saved: ${perceptionJsonPath}`);
+      }
 
       // --- Plan (or load an edited plan) -----------------------------------
       if (opts.editedPlanPath) {
@@ -348,3 +364,86 @@ function writePlanJson(plan: TestPlan, path: string): void {
 }
 
 export type { TestRunResult };
+
+export interface ExploreResult {
+  target: string;
+  perceptionPath: string;
+  stepCount: number;
+  strategy: 'auto' | 'manual';
+}
+
+/**
+ * Standalone explore: open the target, capture a PerceptionSnapshot (auto or
+ * manual), and persist it to `generated/<target>/perception.json` so that
+ * subsequent `plan`/`run` calls can load it with `--reuse-perception`.
+ */
+export async function exploreTarget(
+  target: TargetConfig,
+  opts: {
+    strategy?: 'auto' | 'manual';
+    headed?: boolean;
+    forceAuthRefresh?: boolean;
+    logger: Logger;
+  },
+  deps: OrchestratorDeps,
+): Promise<ExploreResult> {
+  const { cfg, logger } = deps;
+
+  const workdir = resolveFromBase(cfg, join('generated', target.name));
+  mkdirSync(workdir, { recursive: true });
+  const authStatePath = sessionStatePath(target, cfg.baseDir);
+  const perceptionJsonPath = join(workdir, 'perception.json');
+
+  const guard = new CostGuard(0);
+  const llm = meteredProvider(deps.llm, guard);
+
+  let adapter: TestAdapter | undefined;
+  try {
+    adapter = await createAdapter({ target, llm, logger, workdir, authStatePath, baseDir: cfg.baseDir, headed: opts.headed });
+
+    // For manual explore with reuse-state: skip ensureSession if no file yet —
+    // the user will authenticate manually in the browser, and we save afterward.
+    const isManual = (opts.strategy ?? target.explore?.strategy) === 'manual';
+    const sessionMissing = target.auth?.strategy === 'reuse-state' && !existsSync(authStatePath);
+    if (isManual && sessionMissing) {
+      logger.info('[auth] No saved session yet — you will authenticate manually in the browser.');
+    } else {
+      logger.info('[auth] Authenticating…');
+      await ensureSession({
+        adapter,
+        target,
+        baseDir: cfg.baseDir,
+        logger,
+        forceRefresh: opts.forceAuthRefresh,
+      });
+    }
+
+    const effectiveTarget = opts.strategy
+      ? { ...target, explore: { ...target.explore, strategy: opts.strategy } }
+      : target;
+
+    const strategy = effectiveTarget.explore?.strategy ?? 'auto';
+    logger.info(`[explore] Observing target (strategy: ${strategy})…`);
+    const perception = await adapter.explore(effectiveTarget);
+
+    writeFileSync(perceptionJsonPath, JSON.stringify(perception, null, 2));
+    logger.info(`[explore] Saved: ${perceptionJsonPath}`);
+
+    // After manual explore, persist whatever session the user authenticated into.
+    if (isManual && adapter.getStorageState) {
+      const state = await adapter.getStorageState();
+      if (state) {
+        mkdirSync(dirname(authStatePath), { recursive: true });
+        writeFileSync(authStatePath, JSON.stringify(state, null, 2));
+        logger.info(`[auth] Session saved: ${authStatePath}`);
+      }
+    }
+
+    const stepCount = perception.steps?.length ?? 1;
+    return { target: target.name, perceptionPath: perceptionJsonPath, stepCount, strategy };
+  } finally {
+    if (adapter) {
+      try { await adapter.dispose(); } catch { /* ignore */ }
+    }
+  }
+}
