@@ -11,6 +11,7 @@ cases, and business rules, it **proposes a test pipeline, lets you confirm it,
 then generates, executes, and self-heals** real, committable Playwright specs.
 
 - 🧠 **One shared agent loop**, surface-agnostic: `explore → plan → [confirm] → generate → execute (+stability) → heal`.
+- 🕹️ **Manual explore mode**: navigate the app yourself while the agent watches, auto-snapping each DOM-idle state — then reuse the recorded session for plan/run without re-opening the browser.
 - 🔌 **Pluggable adapters** behind one contract. Phase 1 ships `playwright-web` and `playwright-electron` (shared driver + perception).
 - 📚 **Context-grounded**: human intent (requirements → manual tests → business rules) outranks source code; intent/implementation disagreements are surfaced as findings, not silently coded around.
 - 🙋 **Human-in-the-loop**: a confirmation gate shows the proposed pipeline and writes `plan.md` before any code is generated.
@@ -88,6 +89,49 @@ ata run todomvc --plan generated/todomvc/plan.json          # generate from an a
 ata run todomvc --reuse                                     # skip plan+generate, run existing specs
 ```
 
+### Manual explore — navigate once, plan many times
+
+For apps that require real-user interaction (Google OAuth, complex onboarding,
+multi-step wizards), drive the browser yourself and let the agent record the journey:
+
+```bash
+# Step 1 — Open the browser, navigate freely, click "✅ Done" when finished.
+#   The agent auto-snapshots every DOM-idle state. Your session is saved.
+ata explore myapp --manual --headed
+
+# Step 2 — Plan (or run) using the recorded session — no browser reopened.
+ata plan myapp --reuse-perception
+ata run  myapp --reuse-perception --yes
+```
+
+The explore step saves two artefacts under `generated/<target>/`:
+
+- **`perception.json`** — the full multi-step journey (accessibility tree at each
+  navigation). Passed to the planner so it can infer preconditions and trace each
+  scenario to the step it was observed in.
+- **`.auth/<target>.json`** — the browser's `storageState` (cookies + localStorage)
+  captured after you authenticated. Generated specs load it automatically so they
+  start already logged in.
+
+`--manual` also works inline on `plan` and `run` if you prefer a single command:
+
+```bash
+ata plan myapp --manual --headed          # explore → plan in one shot
+ata run  myapp --manual --headed --yes    # explore → plan → generate → execute
+```
+
+Target-level config (persisted in the target YAML):
+
+```yaml
+explore:
+  strategy: manual          # auto (default) | manual
+  idle_timeout_ms: 2000     # ms of DOM quiet before auto-snap (default 2000)
+
+auth:
+  strategy: reuse-state     # load session saved by the last explore run
+  store_state: .auth/myapp.json
+```
+
 ## Configuration
 
 A root `testagent.config.yaml` plus one file per target. Credentials are **never**
@@ -144,6 +188,7 @@ Zod schema** the loader uses, and never overwrites files silently.
 
 | Command | What it does |
 | --- | --- |
+| `ata explore <target>` | Observe the target and save `perception.json` for reuse (supports `--manual`) |
 | `ata validate` | Run all targets, print a PASS/FAIL table, exit non-zero on failure (CI gate) |
 | `ata plan <target>` | Propose a pipeline + write `plan.md` (never generates) |
 | `ata run <target>` | `plan → confirm → generate → execute → heal` |
@@ -154,7 +199,8 @@ Zod schema** the loader uses, and never overwrites files silently.
 | `ata report <target>` | Requirement → test traceability matrix (Phase 2) |
 
 Flags: `--feature <file>`, `--scope <name>`, `--diff <ref>`, `--yes`,
-`--plan <file>`, `--dry-run`, `--reuse`, `--headed`, `--refresh-auth`, `-c/--config <path>`.
+`--plan <file>`, `--dry-run`, `--reuse`, `--manual`, `--reuse-perception`,
+`--headed`, `--refresh-auth`, `-c/--config <path>`.
 
 Approval: an interactive TTY prompts to confirm/edit/abort; `--yes` (or
 `approval: auto`) skips it; CI / non-TTY auto-approve so pipelines never hang on
@@ -172,6 +218,7 @@ if any required target fails.
 
 Each run writes to `generated/<target>/`:
 
+- `perception.json` — recorded journey (multi-step accessibility snapshots). Reuse with `--reuse-perception`.
 - `plan.md` — the human-readable, editable plan (review it; re-run with `--plan`).
 - `plan.json` — the machine plan the generator consumes.
 - `tests/*.spec.ts` + `pages/*` — **real, committable** `@playwright/test` specs.
@@ -207,7 +254,7 @@ Recommendation: commit for public targets, ignore for private.
 
 | Phase | Scope |
 | --- | --- |
-| **1 (this build)** | Web + Electron + reliability core (auth, stability gate, cost guard, grounding, scope, wizard, CLI, CI) |
+| **1 (this build)** | Web + Electron + reliability core (auth, stability gate, cost guard, grounding, scope, wizard, CLI, CI) + manual explore mode + `ata explore` command |
 | 2 | REST API adapter (OpenAPI → request+assertion tests) + requirement→test traceability report |
 | 3 | `--diff` scoped mode + Claude Code skill / MCP packaging |
 | 4 | iOS (`appium-ios`, simulator) |
