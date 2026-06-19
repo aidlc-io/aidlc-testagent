@@ -259,27 +259,58 @@ export async function exploreManual(page: Page, target: TargetConfig): Promise<P
   const injectToolbarAndObserver = () =>
     page.evaluate((ms: number) => {
 
-      // Show a full-screen screenshot preview overlay.
-      function previewScreenshot(index: number) {
+      // Track which eye button currently has its preview open.
+      let activePreviewBtn: HTMLElement | undefined;
+
+      function setEyeOpen(btn: HTMLElement, open: boolean) {
+        if (open) {
+          Object.assign(btn.style, { opacity: '1', borderColor: '#3b82f6', color: '#93c5fd', background: 'rgba(59,130,246,0.12)' });
+        } else {
+          Object.assign(btn.style, { opacity: '0.4', borderColor: '#334155', color: '#94a3b8', background: 'transparent' });
+        }
+      }
+
+      function closePreview() {
+        document.getElementById('__ata_preview__')?.remove();
+        if (activePreviewBtn) { setEyeOpen(activePreviewBtn, false); activePreviewBtn = undefined; }
+      }
+
+      // Show a full-screen screenshot preview overlay. Pass the eye button that triggered it.
+      function previewScreenshot(index: number, btn: HTMLElement) {
+        if (activePreviewBtn === btn) { closePreview(); return; }
+        closePreview();
         (window as any).__ataGetScreenshot__(index).then((b64: string) => {
           if (!b64) return;
-          document.getElementById('__ata_preview__')?.remove();
+          activePreviewBtn = btn;
+          setEyeOpen(btn, true);
           const ov = document.createElement('div');
           ov.id = '__ata_preview__';
           Object.assign(ov.style, {
             position: 'fixed', inset: '0', zIndex: '2147483645',
-            background: 'rgba(0,0,0,0.85)', display: 'flex',
-            alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: '10px',
+            background: 'rgba(0,0,0,0.88)', display: 'flex',
+            alignItems: 'center', justifyContent: 'center', cursor: 'zoom-out',
           });
           const img = document.createElement('img');
           img.src = `data:image/jpeg;base64,${b64}`;
-          Object.assign(img.style, { maxWidth: '90vw', maxHeight: '82vh', borderRadius: '6px', boxShadow: '0 4px 32px rgba(0,0,0,.8)' });
-          const close = document.createElement('button');
-          close.textContent = '✕ Close';
-          Object.assign(close.style, { padding: '6px 18px', background: '#334155', color: '#e2e8f0', border: 'none', borderRadius: '5px', cursor: 'pointer', fontSize: '13px' });
-          close.addEventListener('click', () => ov.remove());
-          ov.addEventListener('click', (e) => { if (e.target === ov) ov.remove(); });
-          ov.appendChild(img); ov.appendChild(close);
+          Object.assign(img.style, { maxWidth: '92vw', maxHeight: '92vh', borderRadius: '6px', boxShadow: '0 4px 32px rgba(0,0,0,.8)', cursor: 'default' });
+          const closeBtn = document.createElement('button');
+          closeBtn.textContent = '✕';
+          closeBtn.title = 'Close (Esc)';
+          Object.assign(closeBtn.style, {
+            position: 'absolute', top: '14px', right: '18px',
+            width: '32px', height: '32px', padding: '0',
+            background: 'rgba(255,255,255,0.15)', color: '#fff',
+            border: '1px solid rgba(255,255,255,0.3)', borderRadius: '50%',
+            cursor: 'pointer', fontSize: '16px', lineHeight: '30px', textAlign: 'center',
+            zIndex: '1',
+          });
+          const dismiss = () => { ov.remove(); if (activePreviewBtn === btn) { setEyeOpen(btn, false); activePreviewBtn = undefined; } };
+          closeBtn.addEventListener('click', (e) => { e.stopPropagation(); dismiss(); });
+          ov.addEventListener('click', dismiss);
+          img.addEventListener('click', (e) => e.stopPropagation());
+          const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') { dismiss(); document.removeEventListener('keydown', onKey); } };
+          document.addEventListener('keydown', onKey);
+          ov.appendChild(img); ov.appendChild(closeBtn);
           document.body.appendChild(ov);
         }).catch(() => {});
       }
@@ -365,19 +396,21 @@ export async function exploreManual(page: Page, target: TargetConfig): Promise<P
           (window as any).__ataGetSteps__().then((list: {index: number; url: string; title: string; name: string}[]) => {
             if (!list.length) { alert('No steps captured yet — navigate around first.'); return; }
             const lastIdx = list.length - 1;
-            const rows = list.map((s) =>
-              `<div style="display:flex;gap:6px;align-items:flex-start;padding:3px 4px;border-radius:5px">
-                <label style="display:flex;gap:8px;align-items:flex-start;flex:1;cursor:pointer">
-                  <input type="radio" name="cpstep" value="${s.index}" ${s.index === lastIdx ? 'checked' : ''} style="margin-top:3px;flex-shrink:0">
-                  <span style="font-size:12px;line-height:1.4">
-                    <strong style="color:#f1f5f9">Step ${s.index + 1}</strong>
-                    <span style="color:#94a3b8"> — ${s.name.slice(0, 55)}</span><br>
-                    <span style="font-size:10px;color:#475569">${(() => { try { return new URL(s.url).pathname.slice(0,40)||'/'; } catch { return s.url.slice(0,40); } })()}</span>
-                  </span>
+            const rows = list.map((s) => {
+              const pathname = (() => { try { return new URL(s.url).pathname.slice(0, 38) || '/'; } catch { return s.url.slice(0, 38); } })();
+              return `<div style="display:flex;gap:6px;align-items:center;padding:4px 4px;border-radius:5px">
+                <label style="display:flex;gap:7px;align-items:center;flex:1;min-width:0;cursor:pointer">
+                  <input type="radio" name="cpstep" value="${s.index}" ${s.index === lastIdx ? 'checked' : ''} style="flex-shrink:0;margin:0">
+                  <div style="min-width:0;flex:1">
+                    <div style="font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">
+                      <strong style="color:#f1f5f9">Step ${s.index + 1}</strong><span style="color:#94a3b8"> — ${s.name.slice(0, 50)}</span>
+                    </div>
+                    <div style="font-size:10px;color:#475569;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${pathname}</div>
+                  </div>
                 </label>
-                <button data-preview="${s.index}" title="Preview" style="flex-shrink:0;margin-top:2px;padding:2px 5px;background:transparent;border:1px solid #334155;border-radius:4px;cursor:pointer;font-size:12px;color:#94a3b8">👁</button>
-              </div>`,
-            ).join('');
+                <button data-preview="${s.index}" title="Preview screenshot" style="flex-shrink:0;padding:2px 6px;background:transparent;border:1px solid #334155;border-radius:4px;cursor:pointer;font-size:12px;color:#94a3b8;opacity:0.4">👁</button>
+              </div>`;
+            }).join('');
             openPopup(`
               <div style="font-size:13px;font-weight:700;color:#f8fafc">📌 Pin Checkpoint</div>
               <div style="font-size:11px;color:#94a3b8">Select which step to pin as a named checkpoint:</div>
@@ -396,9 +429,9 @@ export async function exploreManual(page: Page, target: TargetConfig): Promise<P
             `, (dlg) => {
               (dlg.querySelector('#cpName') as HTMLInputElement).focus();
               dlg.querySelectorAll('[data-preview]').forEach((btn) => {
-                btn.addEventListener('click', (e) => { e.preventDefault(); previewScreenshot(parseInt((btn as HTMLElement).dataset.preview!, 10)); });
+                btn.addEventListener('click', (e) => { e.preventDefault(); previewScreenshot(parseInt((btn as HTMLElement).dataset.preview!, 10), btn as HTMLElement); });
               });
-              dlg.querySelector('#cpCancel')!.addEventListener('click', () => document.getElementById('__ata_overlay__')?.remove());
+              dlg.querySelector('#cpCancel')!.addEventListener('click', () => { closePreview(); document.getElementById('__ata_overlay__')?.remove(); });
               dlg.querySelector('#cpSave')!.addEventListener('click', () => {
                 const name = (dlg.querySelector('#cpName') as HTMLInputElement).value.trim();
                 const isCommon = (dlg.querySelector('#cpCommon') as HTMLInputElement).checked;
@@ -456,10 +489,7 @@ export async function exploreManual(page: Page, target: TargetConfig): Promise<P
         });
 
         const doneBtn = mkBtn('✅ Done', '#22c55e');
-        doneBtn.addEventListener('click', () => { (window as any).__ataDone = true; });
-
-        // Done → review panel (not immediate)
-        doneBtn.removeEventListener('click', doneBtn as any);
+        // __ataDone is set only inside "Save & Done" — not here
         doneBtn.addEventListener('click', () => {
           (window as any).__ataSnapNow__().catch(() => {}).finally(() => {
             (window as any).__ataGetSteps__().then((list: {index: number; url: string; title: string; name: string}[]) => {
@@ -483,6 +513,24 @@ export async function exploreManual(page: Page, target: TargetConfig): Promise<P
               const hdrTxt = document.createElement('div');
               hdrTxt.innerHTML = `<span style="font-size:14px;font-weight:700;color:#f8fafc">✅ Review Steps</span>
                 <span style="font-size:11px;color:#64748b;margin-left:8px">${list.length} captured — rename any before saving</span>`;
+
+              const tcRow = document.createElement('div');
+              Object.assign(tcRow.style, { display: 'flex', flexDirection: 'column', gap: '4px' });
+              const tcLabel = document.createElement('label');
+              tcLabel.textContent = 'Test case name (optional — saves as a use case):';
+              Object.assign(tcLabel.style, { fontSize: '11px', color: '#94a3b8', fontWeight: '600' });
+              const tcInput = document.createElement('input');
+              tcInput.id = '__ata_tc_name__';
+              tcInput.placeholder = 'e.g. create-session, upload-product, login-flow…';
+              Object.assign(tcInput.style, {
+                padding: '6px 9px', borderRadius: '5px',
+                border: '1px solid #3b82f6', background: '#0f172a',
+                color: '#e2e8f0', fontSize: '12px', outline: 'none',
+              });
+              tcRow.appendChild(tcLabel); tcRow.appendChild(tcInput);
+
+              const sep0 = document.createElement('div');
+              Object.assign(sep0.style, { height: '1px', background: '#334155' });
 
               const scroll = document.createElement('div');
               Object.assign(scroll.style, { overflowY: 'auto', flex: '1', display: 'flex', flexDirection: 'column', gap: '4px', paddingRight: '2px' });
@@ -510,8 +558,8 @@ export async function exploreManual(page: Page, target: TargetConfig): Promise<P
                 const eyeBtn = document.createElement('button');
                 eyeBtn.textContent = '👁';
                 eyeBtn.title = 'Preview screenshot';
-                Object.assign(eyeBtn.style, { flexShrink: '0', padding: '2px 5px', background: 'transparent', border: '1px solid #334155', borderRadius: '4px', cursor: 'pointer', fontSize: '12px', color: '#94a3b8' });
-                eyeBtn.addEventListener('click', () => previewScreenshot(s.index));
+                Object.assign(eyeBtn.style, { flexShrink: '0', padding: '2px 5px', background: 'transparent', border: '1px solid #334155', borderRadius: '4px', cursor: 'pointer', fontSize: '12px', color: '#94a3b8', opacity: '0.4' });
+                eyeBtn.addEventListener('click', () => previewScreenshot(s.index, eyeBtn));
                 row.appendChild(num); row.appendChild(inp); row.appendChild(urlSpan); row.appendChild(eyeBtn);
                 scroll.appendChild(row);
               });
@@ -534,12 +582,16 @@ export async function exploreManual(page: Page, target: TargetConfig): Promise<P
                   const inp2 = el as HTMLInputElement;
                   (window as any).__ataSetStepName__(parseInt(inp2.dataset.idx!, 10), inp2.value).catch(() => {});
                 });
+                const tcName = tcInput.value.trim();
+                if (tcName && list.length > 0) {
+                  (window as any).__ataAddUseCase__(tcName, list[0]!.index, list[list.length - 1]!.index);
+                }
                 overlay.remove();
                 (window as any).__ataDone = true;
               });
               footer.appendChild(cancelBtn2); footer.appendChild(confirmBtn);
 
-              dlg.appendChild(hdrTxt); dlg.appendChild(scroll); dlg.appendChild(sep2); dlg.appendChild(footer);
+              dlg.appendChild(hdrTxt); dlg.appendChild(tcRow); dlg.appendChild(sep0); dlg.appendChild(scroll); dlg.appendChild(sep2); dlg.appendChild(footer);
               overlay.appendChild(dlg);
               document.body.appendChild(overlay);
             }).catch(() => { (window as any).__ataDone = true; });

@@ -91,50 +91,60 @@ ata run todomvc --reuse                                     # skip plan+generate
 
 ### Manual explore — navigate once, plan many times
 
-For apps that require real-user interaction (Google OAuth, complex onboarding,
-multi-step wizards), drive the browser yourself and let the agent record the journey:
+> **Drive the browser yourself — the agent turns it into a test.**
+>
+> Navigate your app freely while `ata` watches silently. Every DOM idle and every click is auto-snapped with a meaningful name (`click "Generate" — studio`). Pin checkpoints, record use-case flows, preview each step's screenshot. Hit Done, name the session, and the agent writes the test doc.
 
 ```bash
 # Step 1 — Open the browser, navigate freely, click "✅ Done" when finished.
-#   The agent auto-snapshots every DOM-idle state. Your session is saved.
 ata explore myapp --manual --headed
 
-# Step 2 — Plan (or run) using the recorded session — no browser reopened.
+# Step 2 — Plan and run using the recorded session. No browser reopened.
 ata plan myapp --reuse-perception
 ata run  myapp --reuse-perception --yes
 ```
 
-`--manual` also works inline on `plan` and `run` if you prefer a single command:
+Record once, run many times — including in CI.
+
+`--manual` also works inline on `plan` and `run`:
 
 ```bash
 ata plan myapp --manual --headed          # explore → plan in one shot
 ata run  myapp --manual --headed --yes    # explore → plan → generate → execute
 ```
 
-#### In-browser toolbar
+#### Auto step naming
 
-While exploring, a toolbar appears in the top-right corner of the browser:
+Every step is named automatically from the DOM — no typing required as you navigate:
+
+- **Click actions** — prefixed with the element label: `click "Save" — Edit Profile`
+- **DOM context** — falls back in order: open dialog title → page heading → URL path segment → page title
+
+#### In-browser toolbar
 
 | Button | What it does |
 | --- | --- |
-| **📌 Checkpoint** | Opens a popup listing all captured steps. Select a step, name it, and optionally mark it as a *common precondition* (e.g. "after login"). Saved to `generated/<target>/checkpoints/<name>.json`. |
-| **🎬 Use case** | Pick a start step and name a use case. Navigate through the flow, then click **🏁 End use case**. The agent calls the LLM and produces a markdown manual-test doc under `generated/<target>/use-cases/<name>.md`. |
-| **✅ Done** | End the session. A review panel shows every captured step with its auto-generated name (from DOM context: dialog title → heading → URL path → page title). Rename any step before saving. |
+| **📌 Checkpoint** | Lists all captured steps. Select one, name it, optionally mark as *common precondition* (e.g. "after-login"). Saved to `checkpoints/<name>.json`. Each step shows a **👁** eye button to preview its screenshot. |
+| **🎬 Use case** | Pick a start step and name the flow, navigate through it, then click **🏁 End**. The agent calls the LLM and produces a markdown manual-test doc under `use-cases/<name>.md`. |
+| **✅ Done** | Opens the review panel. |
 
-#### Step naming and screenshots
+#### Done → review panel
 
-Every step is named automatically from the DOM at capture time — no need to type anything as you navigate. Click actions are prefixed with the element label (e.g. `click "Save" — Edit Profile`). A per-step screenshot is kept in memory for the session; click the **👁** eye icon in the checkpoint popup or review panel to preview any step.
+1. **Test case name** *(optional)* — name the entire session as a use case. The agent generates a markdown test doc covering all steps.
+2. **Step list** — every captured step with an editable name input and its URL path.
+3. **👁 eye toggle** — dim by default; click to preview that step's screenshot full-screen (icon turns blue). Click again, press **ESC**, or click the dark background to close.
+4. **Keep exploring** to continue, **✅ Save & Done** to save everything.
 
 #### Saved artefacts
 
-| File | Description |
+| Path | Description |
 | --- | --- |
-| `generated/<target>/perception.json` | Full multi-step journey (accessibility tree + step names). Passed to the planner so it can infer preconditions and trace scenarios to observed steps. |
-| `.auth/<target>.json` | Browser `storageState` (cookies + localStorage) captured after auth. Generated specs load it automatically so they start already logged in. |
-| `generated/<target>/checkpoints/<name>.json` | Named checkpoints (common preconditions for use-case scoping). |
-| `generated/<target>/use-cases/<name>.md` | LLM-generated markdown manual-test doc for each recorded use case. |
+| `generated/<target>/perception.json` | Full journey (accessibility tree + step names). Reuse with `--reuse-perception`. |
+| `generated/<target>/use-cases/<name>.md` | LLM-generated markdown test doc for each recorded use case. |
+| `generated/<target>/checkpoints/<name>.json` | Named checkpoints (common preconditions). |
+| `.auth/<target>.json` | Browser `storageState` captured after auth. Generated specs load it automatically. |
 
-Target-level config (persisted in the target YAML):
+Target-level config:
 
 ```yaml
 explore:

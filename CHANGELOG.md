@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.4.2] - 2026-06-19
+
+### Added
+
+- **Test case name field in Done → review panel** — a prominent input at the top of the review panel lets you name the entire session as a use case. Filling it in automatically creates a use case spanning all captured steps and triggers the LLM to generate a markdown test doc under `use-cases/<name>.md`. Leaving it empty saves without creating a use case.
+
+### Fixed
+
+- **Done button closed the review panel immediately** — a duplicate `click` listener set `__ataDone = true` before the review panel could open, causing the session to exit before the user could rename steps or fill in the test case name. Removed the premature listener; `__ataDone` is now only set when the user clicks "✅ Save & Done" inside the review panel.
+- **Checkpoint popup row layout** — step rows now use `min-width: 0` + `white-space: nowrap` + `text-overflow: ellipsis` on the text block so long step names never wrap and the 👁 button stays pinned to the right edge regardless of content length.
+- **Eye icon toggle state** — eye buttons now have three states: dim by default (closed), highlighted blue when a preview is open (active), and reset to dim when the preview is dismissed (via ✕ button, ESC, background click, or clicking the same eye button again). Only one preview can be open at a time; opening a new one auto-closes the previous. Closing the checkpoint popup also resets any open preview.
+
+---
+
 ## [0.4.1] - 2026-06-19
 
 ### Added
@@ -106,6 +120,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Action guardrail stub: destructive verbs flagged/blocked via `onDestructive` config.
 - No telemetry, no model API keys — all reasoning delegated to a locally-logged-in CLI.
 
+[0.4.2]: https://github.com/aidlc-io/aidlc-testagent/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/aidlc-io/aidlc-testagent/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/aidlc-io/aidlc-testagent/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/aidlc-io/aidlc-testagent/compare/v0.3.0...v0.3.1
