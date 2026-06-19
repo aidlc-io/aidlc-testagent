@@ -119,7 +119,7 @@ Do NOT use baseURL or page.goto — Electron has no URL.`;
   override async explore(target: TargetConfig): Promise<PerceptionSnapshot> {
     const window = await this.ensureWindow();
     if (target.explore?.strategy === 'manual') {
-      return exploreManual(window, target);
+      return exploreManual(window, target, this.deps.workdir);
     }
     await window.waitForLoadState('domcontentloaded').catch(() => undefined);
     return perceive(window, target.name);

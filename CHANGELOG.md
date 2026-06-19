@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.4.3] - 2026-06-19
+
+### Added
+
+- **Live API call counter (`🌐 N`) in explore toolbar** — a new button in the manual explore toolbar tracks XHR/fetch requests in real time. The counter increments as you navigate; click it to open a popup table showing the last 50 API calls with method, URL path, status (colour-coded green/amber/red), and round-trip time.
+- **HAR export on "Save & Done"** — clicking Save & Done automatically writes a [HAR 1.2](https://www.softwareishard.com/blog/har-12-spec/) file containing all XHR/fetch requests captured during the session. When use cases are defined, one file is written per use case (e.g. `dreem-dashboard.har`), sliced to that use case's step-time window; otherwise a single `<target>-explore.har` is written. Files land alongside `perception.json` in `generated/<target>/`.
+- **Output paths shown in review panel** — the Done → review panel now displays a `📁 generated/<target>/` info block listing exactly where `perception.json`, HAR file(s), and use-case docs will be written. The HAR filename updates live as you type the test case name.
+
+---
+
 ## [0.4.2] - 2026-06-19
 
 ### Added

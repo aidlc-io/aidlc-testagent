@@ -63,7 +63,7 @@ export class WebAdapter implements TestAdapter {
   async explore(target: TargetConfig): Promise<PerceptionSnapshot> {
     const page = await this.ensurePage();
     if (target.explore?.strategy === 'manual') {
-      return exploreManual(page, target);
+      return exploreManual(page, target, this.deps.workdir);
     }
     if (target.url) {
       await page.goto(target.url, { waitUntil: 'domcontentloaded' }).catch(() => undefined);

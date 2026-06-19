@@ -7,7 +7,9 @@
  * separate from raw pixels to cut hallucination and token cost (PRD §5, §6).
  */
 
-import type { Frame, Page } from 'playwright';
+import { mkdirSync, writeFileSync } from 'fs';
+import { join } from 'path';
+import type { Frame, Page, Request as PwRequest, Response as PwResponse } from 'playwright';
 import type { ExploreCheckpoint, ExploreUseCase, PerceivedElement, PerceptionSnapshot, TargetConfig } from '../adapter.js';
 
 const MAX_ELEMENTS = 120;
@@ -177,7 +179,57 @@ function autoStepName(snap: PerceptionSnapshot, index: number): string {
   return `step ${index + 1}`;
 }
 
-export async function exploreManual(page: Page, target: TargetConfig): Promise<PerceptionSnapshot> {
+function writeHar(entries: NetworkEntry[], harPath: string): void {
+  writeFileSync(harPath, JSON.stringify({
+    log: {
+      version: '1.2',
+      creator: { name: 'ata-explore', version: '1.0' },
+      entries: entries.map(e => ({
+        startedDateTime: new Date(e.startedAt).toISOString(),
+        time: e.responseTime ?? 0,
+        request: {
+          method: e.method,
+          url: e.url,
+          httpVersion: 'HTTP/1.1',
+          headers: Object.entries(e.requestHeaders ?? {}).map(([n, v]) => ({ name: n, value: v })),
+          queryString: (() => { try { return [...new URL(e.url).searchParams.entries()].map(([n, v]) => ({ name: n, value: v })); } catch { return []; } })(),
+          cookies: [],
+          headersSize: -1,
+          bodySize: e.postData ? e.postData.length : -1,
+          ...(e.postData ? { postData: { mimeType: 'application/json', text: e.postData } } : {}),
+        },
+        response: {
+          status: e.status ?? 0,
+          statusText: e.statusText ?? '',
+          httpVersion: 'HTTP/1.1',
+          headers: Object.entries(e.responseHeaders ?? {}).map(([n, v]) => ({ name: n, value: v })),
+          cookies: [],
+          content: { size: -1, mimeType: '' },
+          redirectURL: '',
+          headersSize: -1,
+          bodySize: -1,
+        },
+        cache: {},
+        timings: { send: 0, wait: e.responseTime ?? 0, receive: 0 },
+      })),
+    },
+  }, null, 2));
+}
+
+interface NetworkEntry {
+  method: string;
+  url: string;
+  resourceType: string;
+  startedAt: number;
+  status?: number;
+  statusText?: string;
+  responseTime?: number;
+  postData?: string;
+  requestHeaders?: Record<string, string>;
+  responseHeaders?: Record<string, string>;
+}
+
+export async function exploreManual(page: Page, target: TargetConfig, workdir?: string): Promise<PerceptionSnapshot> {
   const debounceMs = target.explore?.idleTimeoutMs ?? 2_000;
   const steps: PerceptionSnapshot[] = [];
   const stepNames: string[] = [];
@@ -188,6 +240,33 @@ export async function exploreManual(page: Page, target: TargetConfig): Promise<P
   let snapInProgress = false;
   let debounceTimer: ReturnType<typeof setTimeout> | undefined;
   let exploringDone = false;
+
+  const networkLog: NetworkEntry[] = [];
+  const sessionStartMs = Date.now();
+  const onRequest = (req: PwRequest) => {
+    if (exploringDone) return;
+    networkLog.push({
+      method: req.method(),
+      url: req.url(),
+      resourceType: req.resourceType(),
+      startedAt: Date.now(),
+      postData: req.postData() ?? undefined,
+      requestHeaders: req.headers(),
+    });
+  };
+  const onResponse = (res: PwResponse) => {
+    if (exploringDone) return;
+    const rIdx = [...networkLog].reverse().findIndex(e => e.url === res.url() && e.status === undefined);
+    if (rIdx !== -1) {
+      const entry = networkLog[networkLog.length - 1 - rIdx]!;
+      entry.status = res.status();
+      entry.statusText = res.statusText();
+      entry.responseTime = Date.now() - entry.startedAt;
+      entry.responseHeaders = res.headers();
+    }
+  };
+  page.on('request', onRequest);
+  page.on('response', onResponse);
 
   const snapNow = async (reason: string) => {
     if (exploringDone || snapInProgress) return;
@@ -241,6 +320,20 @@ export async function exploreManual(page: Page, target: TargetConfig): Promise<P
   });
   // Returns base64 JPEG for the preview overlay.
   await page.exposeFunction('__ataGetScreenshot__', (index: number) => stepScreenshots[index] ?? '');
+  await page.exposeFunction('__ataGetNetworkCount__', () =>
+    networkLog.filter(e => e.resourceType === 'xhr' || e.resourceType === 'fetch').length,
+  );
+  await page.exposeFunction('__ataGetNetworkLog__', () =>
+    networkLog
+      .filter(e => e.resourceType === 'xhr' || e.resourceType === 'fetch')
+      .slice(-200)
+      .map(e => ({ method: e.method, url: e.url, status: e.status ?? 0, time: e.responseTime ?? -1 })),
+  );
+  await page.exposeFunction('__ataGetOutputInfo__', () => ({
+    outDir: target.output_dir ?? workdir ?? `generated/${target.name}`,
+    targetName: target.name,
+    useCaseNames: useCases.map(uc => uc.name),
+  }));
   await page.exposeFunction('__ataAddCheckpoint__', (name: string, isCommon: boolean, stepIndex: number) => {
     const slug = name.trim().toLowerCase().replace(/\s+/g, '-') || `checkpoint-${checkpoints.length + 1}`;
     const idx = Math.min(Math.max(0, stepIndex), Math.max(0, steps.length - 1));
@@ -488,11 +581,51 @@ export async function exploreManual(page: Page, target: TargetConfig): Promise<P
           }); // end finally
         });
 
+        // ── 🌐 Network log button ──────────────────────────────────────────
+        const netBtn = mkBtn('🌐 0', '#0f4c75');
+        setInterval(() => {
+          (window as any).__ataGetNetworkCount__()
+            .then((n: number) => { netBtn.textContent = `🌐 ${n}`; })
+            .catch(() => {});
+        }, 800);
+        netBtn.addEventListener('click', () => {
+          (window as any).__ataGetNetworkLog__().then((entries: {method: string; url: string; status: number; time: number}[]) => {
+            if (!entries.length) { alert('No API calls captured yet.'); return; }
+            const rows = [...entries].reverse().slice(0, 50).map(e => {
+              let urlDisplay = e.url;
+              try { const u = new URL(e.url); urlDisplay = (u.pathname + u.search).slice(0, 60); } catch {}
+              const sc = e.status >= 400 ? '#ef4444' : e.status >= 300 ? '#f59e0b' : e.status > 0 ? '#22c55e' : '#64748b';
+              const timeStr = e.time >= 0 ? `${e.time}ms` : '…';
+              return `<div style="display:flex;gap:6px;align-items:center;padding:3px 4px;border-bottom:1px solid #1e293b;font-size:11px">
+                <span style="font-weight:700;color:#94a3b8;width:44px;flex-shrink:0">${e.method}</span>
+                <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#e2e8f0" title="${e.url}">${urlDisplay}</span>
+                <span style="font-weight:700;width:36px;flex-shrink:0;text-align:right;color:${sc}">${e.status || '…'}</span>
+                <span style="width:52px;flex-shrink:0;text-align:right;color:#64748b">${timeStr}</span>
+              </div>`;
+            }).join('');
+            openPopup(`
+              <div style="font-size:13px;font-weight:700;color:#f8fafc">🌐 API Calls <span style="color:#64748b;font-size:11px">(last 50, newest first)</span></div>
+              <div style="display:flex;gap:6px;font-size:10px;color:#475569;padding:0 4px">
+                <span style="width:44px">METHOD</span><span style="flex:1">URL</span>
+                <span style="width:36px;text-align:right">STATUS</span>
+                <span style="width:52px;text-align:right">TIME</span>
+              </div>
+              <div style="overflow-y:auto;max-height:280px;border:1px solid #334155;border-radius:5px">${rows}</div>
+              <div style="display:flex;justify-content:flex-end">
+                <button id="netClose" style="padding:5px 14px;background:#334155;color:#e2e8f0;border:none;border-radius:5px;cursor:pointer;font-size:12px">Close</button>
+              </div>
+            `, (dlg) => {
+              dlg.querySelector('#netClose')!.addEventListener('click', () => document.getElementById('__ata_overlay__')?.remove());
+            });
+          }).catch(() => {});
+        });
+
         const doneBtn = mkBtn('✅ Done', '#22c55e');
         // __ataDone is set only inside "Save & Done" — not here
         doneBtn.addEventListener('click', () => {
           (window as any).__ataSnapNow__().catch(() => {}).finally(() => {
-            (window as any).__ataGetSteps__().then((list: {index: number; url: string; title: string; name: string}[]) => {
+            Promise.all([(window as any).__ataGetSteps__(), (window as any).__ataGetOutputInfo__()])
+            .then(([list, info]: [{index: number; url: string; title: string; name: string}[], {outDir: string; targetName: string; useCaseNames: string[]}]) => {
               document.getElementById('__ata_overlay__')?.remove();
               const overlay = document.createElement('div');
               overlay.id = '__ata_overlay__';
@@ -567,6 +700,41 @@ export async function exploreManual(page: Page, target: TargetConfig): Promise<P
               const sep2 = document.createElement('div');
               Object.assign(sep2.style, { height: '1px', background: '#334155' });
 
+              // ── Output paths info block ──────────────────────────────────
+              const slug = (s: string) => s.trim().toLowerCase().replace(/\s+/g, '-') || null;
+              function buildOutputLines(tcName: string): string {
+                const tn = info.targetName;
+                const existing = info.useCaseNames;
+                const newUc = slug(tcName);
+                const allUcNames = newUc ? [...existing, newUc] : existing;
+                const harLines = allUcNames.length > 0
+                  ? allUcNames.map(n => `<div>🌐 <span style="color:#93c5fd">${tn}-${n}.har</span></div>`).join('')
+                  : `<div>🌐 <span style="color:#93c5fd">${tn}-explore.har</span></div>`;
+                const ucDocLines = allUcNames.length > 0
+                  ? allUcNames.map(n => `<div>📝 <span style="color:#86efac">use-cases/${n}.md</span></div>`).join('')
+                  : '';
+                return `${harLines}${ucDocLines}`;
+              }
+              const outInfo = document.createElement('div');
+              Object.assign(outInfo.style, {
+                background: '#0f172a', borderRadius: '5px', padding: '8px 10px',
+                fontSize: '11px', lineHeight: '1.7', color: '#64748b',
+              });
+              const outInfoLines = document.createElement('div');
+              outInfoLines.id = '__ata_outinfo_lines__';
+              outInfoLines.innerHTML = buildOutputLines('');
+              outInfo.innerHTML = `<span style="color:#38bdf8;font-weight:600">📁 ${info.outDir}/</span>`;
+              const fixed = document.createElement('div');
+              fixed.style.paddingLeft = '10px';
+              fixed.innerHTML = `<div>📄 <span style="color:#94a3b8">perception.json</span></div>`;
+              const dynamic = document.createElement('div');
+              dynamic.style.paddingLeft = '10px';
+              dynamic.appendChild(outInfoLines);
+              outInfo.appendChild(fixed); outInfo.appendChild(dynamic);
+              tcInput.addEventListener('input', () => {
+                outInfoLines.innerHTML = buildOutputLines(tcInput.value);
+              });
+
               const footer = document.createElement('div');
               Object.assign(footer.style, { display: 'flex', gap: '6px', justifyContent: 'flex-end' });
               const cancelBtn2 = document.createElement('button');
@@ -591,7 +759,7 @@ export async function exploreManual(page: Page, target: TargetConfig): Promise<P
               });
               footer.appendChild(cancelBtn2); footer.appendChild(confirmBtn);
 
-              dlg.appendChild(hdrTxt); dlg.appendChild(tcRow); dlg.appendChild(sep0); dlg.appendChild(scroll); dlg.appendChild(sep2); dlg.appendChild(footer);
+              dlg.appendChild(hdrTxt); dlg.appendChild(tcRow); dlg.appendChild(sep0); dlg.appendChild(scroll); dlg.appendChild(sep2); dlg.appendChild(outInfo); dlg.appendChild(footer);
               overlay.appendChild(dlg);
               document.body.appendChild(overlay);
             }).catch(() => { (window as any).__ataDone = true; });
@@ -599,7 +767,7 @@ export async function exploreManual(page: Page, target: TargetConfig): Promise<P
         });
 
         bar.appendChild(lbl); bar.appendChild(stepLbl);
-        bar.appendChild(cpBtn); bar.appendChild(ucBtn); bar.appendChild(doneBtn);
+        bar.appendChild(cpBtn); bar.appendChild(ucBtn); bar.appendChild(netBtn); bar.appendChild(doneBtn);
         document.body?.appendChild(bar);
       }
 
@@ -685,6 +853,8 @@ export async function exploreManual(page: Page, target: TargetConfig): Promise<P
   });
 
   page.off('framenavigated', onNav);
+  page.off('request', onRequest);
+  page.off('response', onResponse);
 
   await page.evaluate(() => {
     (window as any).__ataObserver?.disconnect();
@@ -698,6 +868,32 @@ export async function exploreManual(page: Page, target: TargetConfig): Promise<P
     ...s,
     notes: [...(s.notes?.filter((n) => !n.startsWith(`step ${i + 1}:`)) ?? []), `step ${i + 1}: ${stepNames[i] ?? autoStepName(s, i)}`],
   }));
+
+  // Write per-use-case HAR files, or a single session HAR if no use cases defined.
+  const harEntries = networkLog.filter(e => e.resourceType === 'xhr' || e.resourceType === 'fetch');
+  if (harEntries.length > 0) {
+    const harDir = target.output_dir ?? workdir ?? join(process.cwd(), '.ata-explore');
+    mkdirSync(harDir, { recursive: true });
+    if (useCases.length > 0) {
+      for (const uc of useCases) {
+        // Requests for step N happened after step N-1 settled and before step N settled.
+        const startMs = uc.fromStepIndex > 0
+          ? new Date(namedSteps[uc.fromStepIndex - 1]!.capturedAt).getTime()
+          : sessionStartMs;
+        const endMs = new Date(namedSteps[uc.toStepIndex]!.capturedAt).getTime() + debounceMs;
+        const ucEntries = harEntries.filter(e => e.startedAt >= startMs && e.startedAt <= endMs);
+        if (ucEntries.length > 0) {
+          const harPath = join(harDir, `${target.name}-${uc.name}.har`);
+          writeHar(ucEntries, harPath);
+          process.stderr.write(`  [explore] 💾 HAR [${uc.name}] → ${harPath} (${ucEntries.length} entries)\n`);
+        }
+      }
+    } else {
+      const harPath = join(harDir, `${target.name}-explore.har`);
+      writeHar(harEntries, harPath);
+      process.stderr.write(`  [explore] 💾 HAR saved → ${harPath} (${harEntries.length} entries)\n`);
+    }
+  }
 
   const last = namedSteps.at(-1) ?? (await perceive(page, target.name));
   return {

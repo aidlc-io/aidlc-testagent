@@ -126,6 +126,7 @@ Every step is named automatically from the DOM — no typing required as you nav
 | --- | --- |
 | **📌 Checkpoint** | Lists all captured steps. Select one, name it, optionally mark as *common precondition* (e.g. "after-login"). Saved to `checkpoints/<name>.json`. Each step shows a **👁** eye button to preview its screenshot. |
 | **🎬 Use case** | Pick a start step and name the flow, navigate through it, then click **🏁 End**. The agent calls the LLM and produces a markdown manual-test doc under `use-cases/<name>.md`. |
+| **🌐 N** | Live counter of XHR/fetch calls captured so far. Click to open a popup table: method, URL path, status (colour-coded), round-trip time. Shows the last 50 entries, newest first. |
 | **✅ Done** | Opens the review panel. |
 
 #### Done → review panel
@@ -133,13 +134,15 @@ Every step is named automatically from the DOM — no typing required as you nav
 1. **Test case name** *(optional)* — name the entire session as a use case. The agent generates a markdown test doc covering all steps.
 2. **Step list** — every captured step with an editable name input and its URL path.
 3. **👁 eye toggle** — dim by default; click to preview that step's screenshot full-screen (icon turns blue). Click again, press **ESC**, or click the dark background to close.
-4. **Keep exploring** to continue, **✅ Save & Done** to save everything.
+4. **Output paths info block** — shows exactly where `perception.json`, HAR file(s), and use-case docs will land. The HAR filename updates live as you type the test case name.
+5. **Keep exploring** to continue, **✅ Save & Done** to save everything and write all artefacts.
 
 #### Saved artefacts
 
 | Path | Description |
 | --- | --- |
 | `generated/<target>/perception.json` | Full journey (accessibility tree + step names). Reuse with `--reuse-perception`. |
+| `generated/<target>/<target>-<name>.har` | HAR 1.2 file for each use case (XHR/fetch only, sliced by step timestamps). Falls back to `<target>-explore.har` when no use cases are defined. |
 | `generated/<target>/use-cases/<name>.md` | LLM-generated markdown test doc for each recorded use case. |
 | `generated/<target>/checkpoints/<name>.json` | Named checkpoints (common preconditions). |
 | `.auth/<target>.json` | Browser `storageState` captured after auth. Generated specs load it automatically. |
@@ -248,6 +251,7 @@ Each run writes to `generated/<target>/`:
 - `tests/*.spec.ts` + `pages/*` — **real, committable** `@playwright/test` specs.
 - `checkpoints/<name>.json` — named checkpoints captured during manual explore (common preconditions).
 - `use-cases/<name>.md` — LLM-generated manual-test docs for each recorded use case.
+- `<target>-<name>.har` — HAR 1.2 network log, one per use case (or `<target>-explore.har` when no use cases). Import into Chrome DevTools or Insomnia to inspect API calls.
 
 Whether to commit `generated/` is your call (it's gitignored by default).
 Recommendation: commit for public targets, ignore for private.
