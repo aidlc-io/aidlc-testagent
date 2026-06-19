@@ -7,6 +7,52 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.4.1] - 2026-06-19
+
+### Added
+
+- **Screenshot preview in review panel** — the Done→review step list now shows a 👁 eye icon on every row. Click to see a full-screen overlay of that step's screenshot, same as in the checkpoint popup.
+- **`__ata_preview__` excluded from DOM observer** — the screenshot preview overlay no longer triggers a phantom DOM-idle snapshot.
+
+---
+
+## [0.4.0] - 2026-06-18
+
+### Added
+
+- **Named checkpoints (`📌`)** — click the 📌 button in the manual explore toolbar to open a popup listing all captured steps. Select a step, give it a name, and mark it as a *common precondition* (e.g. "logged in"). The checkpoint is saved as `generated/<target>/checkpoints/<name>.json` after Done.
+- **Use-case recording (`🎬 / 🏁`)** — click 🎬 to mark the start of a use case, name it, navigate through the flow, then click 🏁 to close the range. The agent calls the LLM to produce a structured markdown manual-test document saved to `generated/<target>/use-cases/<name>.md`.
+- **Auto step naming from DOM** — instead of generic "step N" labels, steps are named from the current DOM context in priority order: open dialog title → page heading → URL path segment → page title. Composite names combine the click action with context (e.g. `click "Save" — Edit Profile`).
+- **Click-capture action names** — an in-page click listener (`capture: true` phase) sets the pending action name from the clicked element's `aria-label`, visible text, or `data-testid` before each snap. The walk-up logic skips inner SVG/icon nodes to find the nearest meaningful interactive ancestor.
+- **Done → review panel** — clicking ✅ Done opens a scrollable review panel showing every step with an editable name input and the URL path. Rename any step before confirming; click "Keep exploring" to continue without saving.
+- **Per-step screenshots** — a JPEG screenshot (quality 55, viewport only) is captured alongside each DOM snapshot and kept in memory for the session. Rendered in the checkpoint popup and review panel via 👁 eye icon → full-screen overlay.
+- **SPA-safe fingerprinting** — step deduplication now includes URL + page title so single-page app route changes always produce a distinct step even when element counts are similar.
+- **`ExploreCheckpoint` / `ExploreUseCase` types** added to `adapter.ts` and returned from `exploreManual()`.
+- **`checkpointCount` / `useCaseCount`** surfaced in the CLI summary line after an explore session.
+
+---
+
+## [0.3.1] - 2026-06-18
+
+### Changed
+
+- `ata ask` and `ata guide` updated to cover the new `--manual`, `--reuse-perception`, and `ata explore` features introduced in v0.3.0.
+
+---
+
+## [0.3.0] - 2026-06-18
+
+### Added
+
+- **`ata explore <target>` command** — dedicated explore-only command; saves `perception.json` for later reuse without running the full agent loop.
+- **`--manual` flag** — open a headed browser and navigate the app yourself. The agent watches via `MutationObserver` + `page.exposeFunction` callbacks, auto-snapping each DOM-idle state. A toolbar in the top-right corner (📌 Checkpoint / 🎬 Use case / ✅ Done) controls the session.
+- **`--reuse-perception` flag** — skip the explore phase entirely and reuse the last saved `perception.json` on `ata plan` and `ata run`.
+- **Session artefacts** — manual explore saves `.auth/<target>.json` (browser storage state captured after auth) and `generated/<target>/perception.json` (multi-step accessibility journey). Generated specs load the auth state automatically.
+- **`explore.strategy: manual`** — target-level config to default a target to manual explore mode.
+- **`explore.idle_timeout_ms`** — configurable debounce for DOM-idle snap triggering (default 2000 ms).
+
+---
+
 ## [0.2.0] - 2026-06-18
 
 ### Added
@@ -60,5 +106,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Action guardrail stub: destructive verbs flagged/blocked via `onDestructive` config.
 - No telemetry, no model API keys — all reasoning delegated to a locally-logged-in CLI.
 
+[0.4.1]: https://github.com/aidlc-io/aidlc-testagent/compare/v0.4.0...v0.4.1
+[0.4.0]: https://github.com/aidlc-io/aidlc-testagent/compare/v0.3.1...v0.4.0
+[0.3.1]: https://github.com/aidlc-io/aidlc-testagent/compare/v0.3.0...v0.3.1
+[0.3.0]: https://github.com/aidlc-io/aidlc-testagent/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/aidlc-io/aidlc-testagent/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/aidlc-io/aidlc-testagent/releases/tag/v0.1.0

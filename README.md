@@ -104,21 +104,35 @@ ata plan myapp --reuse-perception
 ata run  myapp --reuse-perception --yes
 ```
 
-The explore step saves two artefacts under `generated/<target>/`:
-
-- **`perception.json`** — the full multi-step journey (accessibility tree at each
-  navigation). Passed to the planner so it can infer preconditions and trace each
-  scenario to the step it was observed in.
-- **`.auth/<target>.json`** — the browser's `storageState` (cookies + localStorage)
-  captured after you authenticated. Generated specs load it automatically so they
-  start already logged in.
-
 `--manual` also works inline on `plan` and `run` if you prefer a single command:
 
 ```bash
 ata plan myapp --manual --headed          # explore → plan in one shot
 ata run  myapp --manual --headed --yes    # explore → plan → generate → execute
 ```
+
+#### In-browser toolbar
+
+While exploring, a toolbar appears in the top-right corner of the browser:
+
+| Button | What it does |
+| --- | --- |
+| **📌 Checkpoint** | Opens a popup listing all captured steps. Select a step, name it, and optionally mark it as a *common precondition* (e.g. "after login"). Saved to `generated/<target>/checkpoints/<name>.json`. |
+| **🎬 Use case** | Pick a start step and name a use case. Navigate through the flow, then click **🏁 End use case**. The agent calls the LLM and produces a markdown manual-test doc under `generated/<target>/use-cases/<name>.md`. |
+| **✅ Done** | End the session. A review panel shows every captured step with its auto-generated name (from DOM context: dialog title → heading → URL path → page title). Rename any step before saving. |
+
+#### Step naming and screenshots
+
+Every step is named automatically from the DOM at capture time — no need to type anything as you navigate. Click actions are prefixed with the element label (e.g. `click "Save" — Edit Profile`). A per-step screenshot is kept in memory for the session; click the **👁** eye icon in the checkpoint popup or review panel to preview any step.
+
+#### Saved artefacts
+
+| File | Description |
+| --- | --- |
+| `generated/<target>/perception.json` | Full multi-step journey (accessibility tree + step names). Passed to the planner so it can infer preconditions and trace scenarios to observed steps. |
+| `.auth/<target>.json` | Browser `storageState` (cookies + localStorage) captured after auth. Generated specs load it automatically so they start already logged in. |
+| `generated/<target>/checkpoints/<name>.json` | Named checkpoints (common preconditions for use-case scoping). |
+| `generated/<target>/use-cases/<name>.md` | LLM-generated markdown manual-test doc for each recorded use case. |
 
 Target-level config (persisted in the target YAML):
 
@@ -222,6 +236,8 @@ Each run writes to `generated/<target>/`:
 - `plan.md` — the human-readable, editable plan (review it; re-run with `--plan`).
 - `plan.json` — the machine plan the generator consumes.
 - `tests/*.spec.ts` + `pages/*` — **real, committable** `@playwright/test` specs.
+- `checkpoints/<name>.json` — named checkpoints captured during manual explore (common preconditions).
+- `use-cases/<name>.md` — LLM-generated manual-test docs for each recorded use case.
 
 Whether to commit `generated/` is your call (it's gitignored by default).
 Recommendation: commit for public targets, ignore for private.
