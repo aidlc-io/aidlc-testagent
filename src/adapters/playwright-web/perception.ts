@@ -8,7 +8,7 @@
  */
 
 import type { Frame, Page } from 'playwright';
-import type { PerceivedElement, PerceptionSnapshot, TargetConfig } from '../adapter.js';
+import type { ExploreCheckpoint, ExploreUseCase, PerceivedElement, PerceptionSnapshot, TargetConfig } from '../adapter.js';
 
 const MAX_ELEMENTS = 120;
 
@@ -149,23 +149,23 @@ function snapFingerprint(snap: PerceptionSnapshot): string {
 export async function exploreManual(page: Page, target: TargetConfig): Promise<PerceptionSnapshot> {
   const debounceMs = target.explore?.idleTimeoutMs ?? 2_000;
   const steps: PerceptionSnapshot[] = [];
+  const checkpoints: ExploreCheckpoint[] = [];
+  const useCases: ExploreUseCase[] = [];
+  let activeUseCase: { name: string; fromStepIndex: number } | null = null;
   let snapInProgress = false;
   let debounceTimer: ReturnType<typeof setTimeout> | undefined;
-  let exploringDone = false; // set true on Done click; stops all further captures
+  let exploringDone = false;
 
   const snapNow = async (reason: string) => {
     if (exploringDone || snapInProgress) return;
     snapInProgress = true;
     try {
-      if (exploringDone) return; // re-check after async gap
+      if (exploringDone) return;
       const snap = await perceive(page, target.name);
-      if (exploringDone) return; // done was clicked while perceive was running
-
-      // Skip if identical to the previous step
+      if (exploringDone) return;
       const fp = snapFingerprint(snap);
       const prev = steps.at(-1);
       if (prev && snapFingerprint(prev) === fp) return;
-
       const stepNum = steps.length + 1;
       steps.push({ ...snap, notes: [...(snap.notes ?? []), `step ${stepNum}: ${reason}`] });
       process.stderr.write(`  [explore] step ${stepNum}: ${snap.url ?? '?'} — ${snap.title ?? '(no title)'}\n`);
@@ -180,54 +180,143 @@ export async function exploreManual(page: Page, target: TargetConfig): Promise<P
     debounceTimer = setTimeout(() => void snapNow(reason), debounceMs);
   };
 
-  // Expose a function the in-page MutationObserver can call back into Node.js.
-  // exposeFunction persists across SPA navigations in Playwright.
+  // --- Node.js callbacks exposed to the browser ----------------------------
   await page.exposeFunction('__ataOnDomIdle__', () => scheduleSnap('dom idle'));
 
+  await page.exposeFunction('__ataAddCheckpoint__', (name: string, isCommon: boolean) => {
+    const stepIndex = Math.max(0, steps.length - 1);
+    const slug = name.trim().toLowerCase().replace(/\s+/g, '-') || `checkpoint-${checkpoints.length + 1}`;
+    checkpoints.push({ name: slug, stepIndex, isCommonPrecondition: isCommon, capturedAt: new Date().toISOString() });
+    process.stderr.write(`  [explore] 📌 checkpoint "${slug}" (step ${stepIndex + 1}${isCommon ? ', common' : ''})\n`);
+  });
+
+  await page.exposeFunction('__ataStartUseCase__', (name: string) => {
+    const slug = name.trim().toLowerCase().replace(/\s+/g, '-') || `use-case-${useCases.length + 1}`;
+    activeUseCase = { name: slug, fromStepIndex: Math.max(0, steps.length - 1) };
+    process.stderr.write(`  [explore] 🎬 use case "${slug}" started (from step ${activeUseCase.fromStepIndex + 1})\n`);
+  });
+
+  await page.exposeFunction('__ataEndUseCase__', () => {
+    if (!activeUseCase) return;
+    const uc: ExploreUseCase = { ...activeUseCase, toStepIndex: Math.max(0, steps.length - 1) };
+    useCases.push(uc);
+    process.stderr.write(`  [explore] 🏁 use case "${uc.name}" ended (steps ${uc.fromStepIndex + 1}–${uc.toStepIndex + 1})\n`);
+    activeUseCase = null;
+  });
+
+  // --- Toolbar + MutationObserver (injected/re-injected into the page) -----
   const injectToolbarAndObserver = () =>
     page.evaluate((ms: number) => {
-      // --- toolbar (Done button only; auto-snapshot handles the rest) ---
       if (!document.getElementById('__ata_toolbar__')) {
+        // ── outer container ──────────────────────────────────────────────
         const bar = document.createElement('div');
         bar.id = '__ata_toolbar__';
         Object.assign(bar.style, {
           position: 'fixed', top: '10px', right: '10px', zIndex: '2147483647',
-          display: 'flex', gap: '6px', fontFamily: 'sans-serif', alignItems: 'center',
+          background: 'rgba(15,23,42,0.93)', borderRadius: '8px', padding: '8px 10px',
+          fontFamily: 'system-ui,sans-serif', display: 'flex', flexDirection: 'column',
+          gap: '6px', boxShadow: '0 4px 20px rgba(0,0,0,.55)', minWidth: '270px',
         });
-        const label = document.createElement('span');
-        label.textContent = 'ATA';
-        Object.assign(label.style, {
-          fontSize: '11px', color: '#94a3b8', fontWeight: 'bold', letterSpacing: '1px',
+
+        // ── row 1: header ────────────────────────────────────────────────
+        const hdr = document.createElement('div');
+        Object.assign(hdr.style, { display: 'flex', alignItems: 'center', justifyContent: 'space-between' });
+        const lbl = document.createElement('span');
+        lbl.textContent = 'ATA EXPLORE';
+        Object.assign(lbl.style, { fontSize: '10px', color: '#475569', fontWeight: '700', letterSpacing: '1px' });
+        const doneBtn = document.createElement('button');
+        doneBtn.id = '__ata_done_btn__';
+        doneBtn.textContent = '✅ Done';
+        Object.assign(doneBtn.style, {
+          padding: '5px 12px', background: '#22c55e', color: '#fff',
+          border: 'none', borderRadius: '5px', cursor: 'pointer', fontSize: '12px',
         });
-        const done = document.createElement('button');
-        done.id = '__ata_done_btn__';
-        done.textContent = '✅ Done';
-        Object.assign(done.style, {
-          padding: '7px 14px', background: '#22c55e', color: '#fff',
-          border: 'none', borderRadius: '6px', cursor: 'pointer',
-          fontSize: '13px', boxShadow: '0 2px 8px rgba(0,0,0,.4)',
+        doneBtn.addEventListener('click', () => { (window as any).__ataDone = true; });
+        hdr.appendChild(lbl); hdr.appendChild(doneBtn);
+
+        // ── divider ──────────────────────────────────────────────────────
+        const div1 = document.createElement('div');
+        Object.assign(div1.style, { height: '1px', background: '#1e293b' });
+
+        // ── row 2: checkpoint ────────────────────────────────────────────
+        const cpRow = document.createElement('div');
+        Object.assign(cpRow.style, { display: 'flex', gap: '4px', alignItems: 'center' });
+        const nameInput = document.createElement('input');
+        nameInput.id = '__ata_name_input__';
+        nameInput.placeholder = 'name…';
+        Object.assign(nameInput.style, {
+          flex: '1', padding: '4px 6px', borderRadius: '4px', border: '1px solid #334155',
+          background: '#0f172a', color: '#e2e8f0', fontSize: '12px', outline: 'none',
         });
-        done.addEventListener('click', () => { (window as any).__ataDone = true; });
-        bar.appendChild(label);
-        bar.appendChild(done);
+        const commonLbl = document.createElement('label');
+        Object.assign(commonLbl.style, { display: 'flex', alignItems: 'center', gap: '3px', color: '#94a3b8', fontSize: '11px', cursor: 'pointer', whiteSpace: 'nowrap' });
+        const commonCb = document.createElement('input');
+        commonCb.type = 'checkbox'; commonCb.id = '__ata_common_cb__';
+        commonLbl.appendChild(commonCb);
+        commonLbl.appendChild(document.createTextNode('common'));
+        const cpBtn = document.createElement('button');
+        cpBtn.title = 'Save as checkpoint'; cpBtn.textContent = '📌';
+        Object.assign(cpBtn.style, {
+          padding: '4px 8px', background: '#1e40af', color: '#fff',
+          border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '13px',
+        });
+        cpBtn.addEventListener('click', () => {
+          const name = nameInput.value.trim();
+          if (!name) { nameInput.style.borderColor = '#ef4444'; setTimeout(() => { nameInput.style.borderColor = '#334155'; }, 800); return; }
+          (window as any).__ataAddCheckpoint__(name, commonCb.checked);
+          cpBtn.textContent = '✓'; setTimeout(() => { cpBtn.textContent = '📌'; }, 1000);
+          nameInput.value = ''; commonCb.checked = false;
+        });
+        cpRow.appendChild(nameInput); cpRow.appendChild(commonLbl); cpRow.appendChild(cpBtn);
+
+        // ── row 3: use case ──────────────────────────────────────────────
+        const ucRow = document.createElement('div');
+        Object.assign(ucRow.style, { display: 'flex', gap: '4px', alignItems: 'center' });
+        const startBtn = document.createElement('button');
+        startBtn.id = '__ata_uc_start__'; startBtn.textContent = '🎬 Start flow';
+        Object.assign(startBtn.style, {
+          flex: '1', padding: '4px 8px', background: '#7c3aed', color: '#fff',
+          border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '12px',
+        });
+        const endBtn = document.createElement('button');
+        endBtn.id = '__ata_uc_end__'; endBtn.textContent = '🏁 End flow';
+        endBtn.style.display = 'none';
+        Object.assign(endBtn.style, {
+          flex: '1', padding: '4px 8px', background: '#b45309', color: '#fff',
+          border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '12px',
+        });
+        const recLbl = document.createElement('span');
+        recLbl.id = '__ata_uc_rec__';
+        Object.assign(recLbl.style, { fontSize: '11px', color: '#fbbf24', display: 'none' });
+        startBtn.addEventListener('click', () => {
+          const name = nameInput.value.trim();
+          if (!name) { nameInput.style.borderColor = '#ef4444'; nameInput.focus(); setTimeout(() => { nameInput.style.borderColor = '#334155'; }, 800); return; }
+          (window as any).__ataStartUseCase__(name);
+          recLbl.textContent = `● ${name}`; recLbl.style.display = '';
+          startBtn.style.display = 'none'; endBtn.style.display = '';
+          nameInput.value = '';
+        });
+        endBtn.addEventListener('click', () => {
+          (window as any).__ataEndUseCase__();
+          recLbl.style.display = 'none';
+          endBtn.style.display = 'none'; startBtn.style.display = '';
+        });
+        ucRow.appendChild(startBtn); ucRow.appendChild(endBtn); ucRow.appendChild(recLbl);
+
+        bar.appendChild(hdr); bar.appendChild(div1); bar.appendChild(cpRow); bar.appendChild(ucRow);
         document.body?.appendChild(bar);
       }
 
-      // --- MutationObserver (one per page; survives SPA route changes) ---
+      // ── MutationObserver ─────────────────────────────────────────────────
       if (!(window as any).__ataObserver) {
         let timer: ReturnType<typeof setTimeout>;
         const observer = new MutationObserver((mutations) => {
-          // Ignore mutations originating from our own toolbar overlay
           const allOurs = mutations.every((m) => {
             let node: Node | null = m.target;
-            while (node) {
-              if ((node as Element).id === '__ata_toolbar__') return true;
-              node = node.parentNode;
-            }
+            while (node) { if ((node as Element).id === '__ata_toolbar__') return true; node = node.parentNode; }
             return false;
           });
-          if (allOurs) return;
-          if ((window as any).__ataDone) return;
+          if (allOurs || (window as any).__ataDone) return;
           clearTimeout(timer);
           timer = setTimeout(() => (window as any).__ataOnDomIdle__(), ms);
         });
@@ -240,7 +329,7 @@ export async function exploreManual(page: Page, target: TargetConfig): Promise<P
       }
     }, debounceMs).catch(() => {});
 
-  // Navigate to start URL and take initial snapshot.
+  // Navigate + initial snapshot
   if (target.url) {
     await page.goto(target.url, { waitUntil: 'domcontentloaded' }).catch(() => undefined);
     await page.waitForLoadState('networkidle', { timeout: 5_000 }).catch(() => undefined);
@@ -248,8 +337,6 @@ export async function exploreManual(page: Page, target: TargetConfig): Promise<P
   await snapNow('initial');
   await injectToolbarAndObserver();
 
-  // Re-inject toolbar + observer after hard navigations (SPA route changes
-  // keep window intact so the observer survives; only hard reloads need this).
   const onNav = (frame: Frame) => {
     if (frame !== page.mainFrame()) return;
     void injectToolbarAndObserver();
@@ -257,25 +344,31 @@ export async function exploreManual(page: Page, target: TargetConfig): Promise<P
   page.on('framenavigated', onNav);
 
   process.stderr.write('\n[explore] Manual mode — navigate the app freely in the browser.\n');
-  process.stderr.write('[explore] Every interaction is auto-snapshotted after DOM settles.\n');
-  process.stderr.write('[explore] Click "✅ Done" (top-right of the app) when finished.\n\n');
+  process.stderr.write('[explore] Toolbar (top-right): 📌 checkpoint  🎬/🏁 use case  ✅ Done\n\n');
 
-  // Wait for Done click.
+  // Wait for Done click
   await new Promise<void>((resolve) => {
     const poll = setInterval(async () => {
       try {
         const done = await page.evaluate(() => (window as any).__ataDone === true);
         if (done) {
-          exploringDone = true;           // stop all further captures immediately
+          exploringDone = true;
           if (debounceTimer) clearTimeout(debounceTimer);
           clearInterval(poll);
           resolve();
         }
-      } catch { /* mid-navigation, retry */ }
+      } catch { /* mid-navigation */ }
     }, 400);
   });
 
   page.off('framenavigated', onNav);
+
+  // Close any open use case
+  if (activeUseCase !== null) {
+    const uc = activeUseCase as { name: string; fromStepIndex: number };
+    useCases.push({ name: uc.name, fromStepIndex: uc.fromStepIndex, toStepIndex: Math.max(0, steps.length - 1) });
+    process.stderr.write(`  [explore] 🏁 use case "${uc.name}" auto-closed at Done\n`);
+  }
 
   await page.evaluate(() => {
     (window as any).__ataObserver?.disconnect();
@@ -283,5 +376,10 @@ export async function exploreManual(page: Page, target: TargetConfig): Promise<P
   }).catch(() => {});
 
   const last = steps.at(-1) ?? (await perceive(page, target.name));
-  return { ...last, steps };
+  return {
+    ...last,
+    steps,
+    checkpoints: checkpoints.length ? checkpoints : undefined,
+    useCases: useCases.length ? useCases : undefined,
+  };
 }

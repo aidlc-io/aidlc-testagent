@@ -11,6 +11,7 @@
 import { writeFileSync, readFileSync, mkdirSync, existsSync } from 'node:fs';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import type {
+  ExploreUseCase,
   ExecutionResult,
   Logger,
   PerceptionSnapshot,
@@ -365,11 +366,44 @@ function writePlanJson(plan: TestPlan, path: string): void {
 
 export type { TestRunResult };
 
+async function generateUseCaseDoc(
+  uc: ExploreUseCase,
+  steps: PerceptionSnapshot[],
+  llm: LlmProvider,
+): Promise<string> {
+  const stepsText = steps.map((s, i) => {
+    const tree = s.accessibilityTree?.slice(0, 1200) ?? s.domSummary?.slice(0, 800) ?? '(no snapshot)';
+    return `### Step ${uc.fromStepIndex + i + 1}: ${s.url ?? ''} — ${s.title ?? ''}\n${tree}`;
+  }).join('\n\n');
+
+  const res = await llm.complete({
+    system: 'You are a QA writer producing concise manual test cases in Markdown.',
+    prompt: `Document the following manually-explored user flow as a formal manual test case.
+
+Use case: "${uc.name}"
+Captured steps (${steps.length}):
+
+${stepsText}
+
+Write a Markdown document with:
+- **h2 title** matching the use case name
+- **Preconditions** section (bullet list)
+- **Steps** (numbered; each as "Action → Expected result")
+- **Pass criteria** (bullet list)
+
+Keep it under 500 words. Return only the Markdown, no preamble.`,
+  });
+
+  return res.text.trim();
+}
+
 export interface ExploreResult {
   target: string;
   perceptionPath: string;
   stepCount: number;
   strategy: 'auto' | 'manual';
+  checkpointCount: number;
+  useCaseCount: number;
 }
 
 /**
@@ -429,6 +463,34 @@ export async function exploreTarget(
     writeFileSync(perceptionJsonPath, JSON.stringify(perception, null, 2));
     logger.info(`[explore] Saved: ${perceptionJsonPath}`);
 
+    // Save checkpoint snapshots
+    if (perception.checkpoints?.length) {
+      const cpDir = join(workdir, 'checkpoints');
+      mkdirSync(cpDir, { recursive: true });
+      for (const cp of perception.checkpoints) {
+        const snapshot = perception.steps?.[cp.stepIndex] ?? perception;
+        writeFileSync(join(cpDir, `${cp.name}.json`), JSON.stringify({ ...cp, snapshot }, null, 2));
+        logger.info(`[explore] 📌 Checkpoint saved: checkpoints/${cp.name}.json`);
+      }
+    }
+
+    // Generate use-case markdown docs via LLM
+    if (perception.useCases?.length) {
+      const ucDir = join(workdir, 'use-cases');
+      mkdirSync(ucDir, { recursive: true });
+      for (const uc of perception.useCases) {
+        const ucSteps = (perception.steps ?? []).slice(uc.fromStepIndex, uc.toStepIndex + 1);
+        logger.info(`[explore] 🎬 Generating doc for "${uc.name}" (${ucSteps.length} step(s))…`);
+        try {
+          const md = await generateUseCaseDoc(uc, ucSteps, llm);
+          writeFileSync(join(ucDir, `${uc.name}.md`), md);
+          logger.info(`[explore] ✅ Use case saved: use-cases/${uc.name}.md`);
+        } catch (e) {
+          logger.warn(`[explore] Could not generate doc for "${uc.name}": ${(e as Error).message}`);
+        }
+      }
+    }
+
     // After manual explore, persist whatever session the user authenticated into.
     if (isManual && adapter.getStorageState) {
       const state = await adapter.getStorageState();
@@ -440,7 +502,14 @@ export async function exploreTarget(
     }
 
     const stepCount = perception.steps?.length ?? 1;
-    return { target: target.name, perceptionPath: perceptionJsonPath, stepCount, strategy };
+    return {
+      target: target.name,
+      perceptionPath: perceptionJsonPath,
+      stepCount,
+      strategy,
+      checkpointCount: perception.checkpoints?.length ?? 0,
+      useCaseCount: perception.useCases?.length ?? 0,
+    };
   } finally {
     if (adapter) {
       try { await adapter.dispose(); } catch { /* ignore */ }

@@ -158,6 +158,28 @@ export interface PerceivedEndpoint {
   responseSchema?: unknown;
 }
 
+/** A named state the user pinned during manual explore — reusable as a
+ *  precondition / setup fixture in generated specs. */
+export interface ExploreCheckpoint {
+  /** Slug name the user typed, e.g. "after-login", "studio-ready". */
+  name: string;
+  /** Index into `PerceptionSnapshot.steps[]` where this was pinned. */
+  stepIndex: number;
+  /** True → this is common setup shared by many scenarios (e.g. auth). */
+  isCommonPrecondition: boolean;
+  capturedAt: string;
+}
+
+/** A named flow the user bracketed with Start/End during manual explore.
+ *  After explore the orchestrator asks the LLM to write a manual-test doc
+ *  from these steps, which can feed `context.manual_tests`. */
+export interface ExploreUseCase {
+  /** Slug name the user typed, e.g. "virtual-model-generation". */
+  name: string;
+  fromStepIndex: number;
+  toStepIndex: number;
+}
+
 /** A normalized observation of the running target. Adapter-independent so the
  *  core and LLM prompts stay surface-agnostic (PRD §6). */
 export interface PerceptionSnapshot {
@@ -175,6 +197,10 @@ export interface PerceptionSnapshot {
   notes?: string[];
   /** Sequential snapshots captured during a manual explore session. */
   steps?: PerceptionSnapshot[];
+  /** Named states pinned by the user during manual explore. */
+  checkpoints?: ExploreCheckpoint[];
+  /** Named flows bracketed by the user during manual explore. */
+  useCases?: ExploreUseCase[];
 }
 
 // ---------------------------------------------------------------------------

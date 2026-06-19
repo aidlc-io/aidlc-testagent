@@ -28,7 +28,7 @@ const program = new Command();
 program
   .name('aidlc-testagent')
   .description('AI test agent for web, desktop, API & mobile. No telemetry. No model API keys.')
-  .version('0.1.0')
+  .version('0.4.0')
   .option('-c, --config <path>', 'path to testagent.config.yaml');
 
 function loadCfg(cmd: Command): ResolvedConfig {
@@ -109,9 +109,14 @@ program
       },
       { cfg, llm, logger },
     );
+    const extras: string[] = [];
+    if (result.checkpointCount) extras.push(`${result.checkpointCount} checkpoint(s)`);
+    if (result.useCaseCount) extras.push(`${result.useCaseCount} use-case doc(s)`);
+    const extrasLine = extras.length ? `  Extras: ${extras.join(', ')} saved.\n` : '';
     console.error(
       `\n✔ Explored "${result.target}" — ${result.stepCount} step(s) captured (${result.strategy}).\n` +
         `  Saved to: ${result.perceptionPath}\n` +
+        extrasLine +
         `  Use --reuse-perception on plan/run to skip re-exploring.\n`,
     );
   });
