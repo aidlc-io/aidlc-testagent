@@ -28,7 +28,7 @@ const program = new Command();
 program
   .name('aidlc-testagent')
   .description('AI test agent for web, desktop, API & mobile. No telemetry. No model API keys.')
-  .version('0.4.0')
+  .version('0.4.1')
   .option('-c, --config <path>', 'path to testagent.config.yaml');
 
 function loadCfg(cmd: Command): ResolvedConfig {
