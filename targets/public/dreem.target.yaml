@@ -4,11 +4,9 @@ url: https://dev.dreem.ai/
 perception: accessibility
 
 explore:
-  strategy: manual
-  idle_timeout_ms: 2000
+  strategy: mcp
 
-# Session saved during manual explore — reused by all generated specs.
-# Run: ata explore dreem --manual --headed  to refresh the session.
+# Session saved during explore — reused by all generated specs.
 auth:
   strategy: reuse-state
   store_state: .auth/dreem.json

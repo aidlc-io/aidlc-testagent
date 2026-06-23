@@ -8,6 +8,8 @@ dist/
 # Secrets & private targets (NEVER commit) — see PRD §13
 targets/private.yaml
 targets/private/
+targets/public/dreem-auto.target.yaml
+targets/public/dreem-mcp.target.yaml
 .env
 .env.*
 !.env.example

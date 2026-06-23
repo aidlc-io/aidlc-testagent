@@ -25,6 +25,7 @@ import { generateTests } from './generate.js';
 import { runStabilitySuite } from './runner.js';
 import { formLogin } from './login.js';
 import { readCredentials } from '../../auth/credentials.js';
+import { mcpExplore } from './mcp-explore.js';
 
 const WEB_SURFACE_GUIDE = `This is a WEB target. The @playwright/test "page" fixture is provided to each test.
 baseURL is configured, so navigate with page.goto('/') or page.goto('/path'). Do not launch a browser yourself.`;
@@ -61,10 +62,15 @@ export class WebAdapter implements TestAdapter {
   }
 
   async explore(target: TargetConfig): Promise<PerceptionSnapshot> {
+    if (target.explore?.strategy === 'mcp') {
+      return mcpExplore(target, this.deps.llm, this.deps.logger);
+    }
     const page = await this.ensurePage();
     if (target.explore?.strategy === 'manual') {
+      this.deps.logger.info('[explore:manual/playwright] Opening browser for manual exploration…');
       return exploreManual(page, target, this.deps.workdir);
     }
+    this.deps.logger.info('[explore:auto/playwright] Navigating and snapping accessibility tree…');
     if (target.url) {
       await page.goto(target.url, { waitUntil: 'domcontentloaded' }).catch(() => undefined);
       await page.waitForLoadState('networkidle', { timeout: 5_000 }).catch(() => undefined);

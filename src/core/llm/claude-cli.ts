@@ -3,7 +3,13 @@
  * CLI (PRD §7a). Spawns (flags below match the installed Claude Code CLI):
  *
  *   claude -p --output-format json [--json-schema <inline-json>] \
- *          [--system-prompt <s>] [--model <model>] [--strict-mcp-config]
+ *          [--system-prompt <s>] [--model <model>] [--strict-mcp-config] \
+ *          [--mcp-config <json>]
+ *
+ * When `req.mcpServers` is provided the call switches to MCP tool-use mode:
+ *   - --mcp-config is added wrapping the server map as { mcpServers: ... }
+ *   - --json-schema is omitted (incompatible with multi-turn tool calls)
+ *   - --strict-mcp-config is omitted so MCP tools are reachable
  *
  * and feeds the prompt on stdin (avoids ARG_MAX on large grounded prompts).
  * Parses the JSON envelope: reads `.result`, checks `.is_error`, surfaces
@@ -48,7 +54,7 @@ export class ClaudeCliProvider implements LlmProvider {
     this.command = opts.command ?? 'claude';
     this.model = opts.model;
     this.bare = opts.bare ?? false;
-    this.timeoutMs = opts.timeoutMs ?? 240_000;
+    this.timeoutMs = opts.timeoutMs ?? 360_000;
   }
 
   async preflight(): Promise<void> {
@@ -69,19 +75,27 @@ export class ClaudeCliProvider implements LlmProvider {
   }
 
   async complete(req: CompletionRequest): Promise<CompletionResult> {
+    const hasMcp = !!req.mcpServers && Object.keys(req.mcpServers).length > 0;
+
     const args = ['-p', '--output-format', 'json'];
     const model = req.model ?? this.model;
     if (model) args.push('--model', model);
     if (req.system) args.push('--system-prompt', req.system);
-    if (req.schema) args.push('--json-schema', JSON.stringify(req.schema));
-    if (this.bare) args.push('--strict-mcp-config');
+    // --json-schema is incompatible with MCP tool-use mode; skip it when using MCP.
+    if (req.schema && !hasMcp) args.push('--json-schema', JSON.stringify(req.schema));
+    // --mcp-server injects servers; skip --strict-mcp-config so tools are reachable.
+    if (hasMcp) {
+      args.push('--mcp-config', JSON.stringify({ mcpServers: req.mcpServers }));
+    } else if (this.bare) {
+      args.push('--strict-mcp-config');
+    }
 
     // Strip ANTHROPIC_API_KEY so `claude` falls back to its OAuth session.
     // If a key is present in the shell env, claude prefers it over OAuth; an
     // invalid or mismatched key causes "Invalid API key".
     const res = await runCommand(this.command, args, {
       stdin: req.prompt,
-      timeoutMs: this.timeoutMs,
+      timeoutMs: req.timeoutMs ?? this.timeoutMs,
       omitEnv: ['ANTHROPIC_API_KEY'],
     });
 

@@ -81,7 +81,7 @@ export interface GuardrailConfig {
 
 /** Controls how the agent observes the target before planning. */
 export interface ExploreConfig {
-  strategy: 'auto' | 'manual';
+  strategy: 'auto' | 'manual' | 'mcp';
   /** ms to wait after each navigation before snapping (manual mode only, default 2000). */
   idleTimeoutMs?: number;
 }

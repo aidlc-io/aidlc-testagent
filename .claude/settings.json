@@ -1,0 +1,20 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__playwright__browser_navigate",
+      "mcp__playwright__browser_snapshot",
+      "mcp__playwright__browser_take_screenshot",
+      "mcp__playwright__browser_click",
+      "mcp__playwright__browser_type",
+      "mcp__playwright__browser_hover",
+      "mcp__playwright__browser_select_option",
+      "mcp__playwright__browser_fill",
+      "mcp__playwright__browser_press_key",
+      "mcp__playwright__browser_wait_for",
+      "mcp__playwright__browser_tab_new",
+      "mcp__playwright__browser_tab_list",
+      "mcp__playwright__browser_tab_select",
+      "mcp__playwright__browser_close"
+    ]
+  }
+}

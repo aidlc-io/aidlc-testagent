@@ -50,8 +50,8 @@ export interface RunOptions {
   forceAuthRefresh?: boolean;
   /** Load perception from generated/<target>/perception.json instead of re-exploring. */
   reusePerception?: boolean;
-  /** Override explore strategy for this run only ('manual' | 'auto'). */
-  exploreStrategy?: 'auto' | 'manual';
+  /** Override explore strategy for this run only. */
+  exploreStrategy?: 'auto' | 'manual' | 'mcp';
   isTty: boolean;
   isCi: boolean;
 }
@@ -254,6 +254,7 @@ export async function runTarget(
     let healedCount = 0;
     if (result.failed.length > 0 && maxHeal > 0) {
       logger.info(`[heal] Attempting to repair ${result.failed.length} failing test(s)…`);
+      const useMcpHeal = target.explore?.strategy === 'mcp' && !!target.url;
       const healResult = await heal({
         adapter,
         llm,
@@ -266,6 +267,9 @@ export async function runTarget(
         timeoutMs: cfg.defaults.timeout_ms,
         session,
         logger,
+        ...(useMcpHeal
+          ? { mcpServers: { playwright: { type: 'stdio', command: 'npx', args: ['@playwright/mcp'] } }, targetUrl: target.url }
+          : {}),
       });
       healedCount = healResult.healed.length;
       result = {
@@ -401,7 +405,7 @@ export interface ExploreResult {
   target: string;
   perceptionPath: string;
   stepCount: number;
-  strategy: 'auto' | 'manual';
+  strategy: 'auto' | 'manual' | 'mcp';
   checkpointCount: number;
   useCaseCount: number;
 }
@@ -414,7 +418,7 @@ export interface ExploreResult {
 export async function exploreTarget(
   target: TargetConfig,
   opts: {
-    strategy?: 'auto' | 'manual';
+    strategy?: 'auto' | 'manual' | 'mcp';
     headed?: boolean;
     forceAuthRefresh?: boolean;
     logger: Logger;

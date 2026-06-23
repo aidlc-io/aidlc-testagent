@@ -11,7 +11,7 @@ llm:
 
 defaults:
   max_heal_attempts: 2
-  timeout_ms: 30000
+  timeout_ms: 60000
   approval: prompt # prompt | auto | manual-edit
   max_budget_usd: 10.00 # cost guard per target run; 0 = unlimited
   stability:

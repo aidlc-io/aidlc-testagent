@@ -11,15 +11,30 @@
 /** A JSON Schema object passed to the CLI to demand schema-conforming output. */
 export type JsonSchema = Record<string, unknown>;
 
+/** Spawn config for one MCP server (stdio transport). */
+export interface McpServerConfig {
+  type: 'stdio';
+  command: string;
+  args: string[];
+  env?: Record<string, string>;
+}
+
 export interface CompletionRequest {
   /** System / role framing for the model. */
   system?: string;
   /** The user prompt. */
   prompt: string;
-  /** When set, demand output conforming to this JSON Schema. */
+  /** When set, demand output conforming to this JSON Schema.
+   *  Mutually exclusive with `mcpServers` — omit when using MCP tool calls. */
   schema?: JsonSchema;
   /** Optional per-call model override (else the provider default is used). */
   model?: string;
+  /** MCP servers to inject for this call. When present, the provider passes
+   *  them to the CLI so the model can drive browser/tool actions.
+   *  Incompatible with `schema` (structured-output mode). */
+  mcpServers?: Record<string, McpServerConfig>;
+  /** Per-call timeout override in ms. Falls back to the provider default. */
+  timeoutMs?: number;
 }
 
 export interface CompletionResult {

@@ -132,7 +132,7 @@ export const guardrailSchema = z
 
 export const exploreSchema = z
   .object({
-    strategy: z.enum(['auto', 'manual']).default('auto'),
+    strategy: z.enum(['auto', 'manual', 'mcp']).default('auto'),
     idle_timeout_ms: z.number().int().positive().optional(),
   })
   .strict()
