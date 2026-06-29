@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.7.0] - 2026-06-29
+
+### Added
+
+- **MCP server** (`ata-mcp` / `aidlc-testagent-mcp` binary) — exposes `ata_list`, `ata_plan`, `ata_run`, `ata_validate`, and `ata_explore` as MCP tools so any MCP-compatible client (Claude Desktop, Claude Code) can drive the agent without a terminal. Install via `npx aidlc-testagent-mcp` and configure in your client's MCP settings with `cwd` pointing to your project. See `integrations/README.md` for setup instructions.
+
+---
+
 ## [0.4.3] - 2026-06-19
 
 ### Added
