@@ -1,6 +1,6 @@
 {
   "name": "aidlc-testagent",
-  "version": "0.5.0",
+  "version": "0.7.0",
   "description": "Open-source AI test agent for web, desktop, API & mobile. Point it at a target, approve the plan, get a passing test suite. No telemetry.",
   "license": "MIT",
   "type": "module",
